@@ -103,3 +103,8 @@ ENV/
 
 # IDE settings
 .vscode/
+.idea/
+
+# venv settings
+Pipfile
+Pipfile.lock
