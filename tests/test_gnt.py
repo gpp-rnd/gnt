@@ -74,7 +74,8 @@ def test_get_residual(bigpapi_lfcs):
 
 
 def test_order_genes():
-    genes = pd.DataFrame({'anchor_gene': ['A', 'B', 'B'], 'target_gene': ['B', 'B', 'A']})
+    genes = pd.DataFrame({'guide1': [1,2,3], 'guide2': [1,2,3],
+                          'anchor_gene': ['A', 'B', 'B'], 'target_gene': ['B', 'B', 'A']})
     ordered_genes = score.order_genes(genes)
     expected_order = genes.copy()
     expected_order['gene_a'] = ['A', 'B', 'A']
@@ -84,9 +85,16 @@ def test_order_genes():
 
 def test_get_gene_results(bigpapi_lfcs):
     model_info_df, guide_residuals = gnt.get_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'])
-    gene_results = gnt.get_gene_results(guide_residuals)
+    gene_results = gnt.get_gene_residuals(guide_residuals)
     assert ((gene_results.sort_values('z_score')
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
 
+
+def test_get_gene_dlfc(bigpapi_lfcs):
+    gene_dlfc, _ = gnt.get_dlfc(bigpapi_lfcs, ['CD81', 'HPRT intron'])
+    assert ((gene_dlfc.sort_values('dlfc')
+             .head(1)
+             [['gene_a', 'gene_b']]
+             .values) == [['MAPK1', 'MAPK3']]).all()

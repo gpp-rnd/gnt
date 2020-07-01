@@ -130,7 +130,7 @@ def get_residuals(df, ctl_genes, fit_genes=None):
     Parameters
     ----------
     df: DataFrame
-        LFCs from combinatorial screens
+        LFCs from combinatorial screen
     ctl_genes: list
         Negative control genes (e.g. nonessential, intronic, or no site)
     fit_genes: list
@@ -154,8 +154,10 @@ def get_residuals(df, ctl_genes, fit_genes=None):
     return model_info_df, guide_residuals
 
 
-def order_genes(df, gene1='anchor_gene', gene2='target_gene'):
+def order_genes(df):
     """reorder anchor and target genes to be in alphabetical order"""
+    gene1 = df.columns[2]
+    gene2 = df.columns[3]
     anchor_target_df = df[[gene1, gene2]].drop_duplicates()
     anchor_target_df['gene_a'] = anchor_target_df.apply(lambda row: (row[gene1] if
                                                                      row[gene1] <= row[gene2]
@@ -210,15 +212,15 @@ def combine_residuals(df, pop_stats):
     return combo_stats[['condition', 'gene_a', 'gene_b', 'z_score']]
 
 
-def get_avg_score(df):
-    """get avg lfc"""
+def get_avg_score(df, score):
+    """get avg lfc or any other score"""
     avg_score = (df.groupby(['condition', 'gene_a', 'gene_b'])
-                 .agg({'lfc': 'mean'})
+                 .agg({score: 'mean'})
                  .reset_index())
     return avg_score
 
 
-def get_gene_results(df):
+def get_gene_residuals(df):
     """Combine residuals at the gene level
 
     Parameters
@@ -237,13 +239,59 @@ def get_gene_results(df):
     gene_a_anchor_z = combine_residuals(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats)
     gene_b_anchor_z = combine_residuals(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats)
     combined_z = combine_residuals(ordered_df, pop_stats)
-    avg_score = get_avg_score(ordered_df)
+    avg_score = get_avg_score(ordered_df, 'lfc')
     gene_results = (avg_score.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
                            on=['condition', 'gene_a', 'gene_b'], suffixes=['', '_gene_a_anchor'])
                     .merge(gene_b_anchor_z, how='inner',
                            on=['condition', 'gene_a', 'gene_b'], suffixes=['', '_gene_b_anchor']))
     return gene_results
+
+
+def calc_dlfc(df, base_lfcs):
+    """Add together base lfcs to generate an expectation for each guide pair"""
+    guide1 = df.columns[0]
+    guide2 = df.columns[1]
+    dlfc = (df.merge(base_lfcs, how='inner', left_on=[guide1, 'condition'],
+                            right_on=['anchor_guide', 'condition'], suffixes=['', '_' + guide1 + '_base'])
+            .drop('anchor_guide', axis=1)
+            .merge(base_lfcs, how='inner', left_on=[guide2, 'condition'],
+                   right_on=['anchor_guide', 'condition'], suffixes=['', '_' + guide2 + '_base'])
+            .drop('anchor_guide', axis=1))
+    dlfc['sum_lfc'] = dlfc['lfc_' + guide1 + '_base'] + dlfc['lfc_' + guide2 + '_base']
+    dlfc['dlfc'] = dlfc['lfc'] - dlfc['sum_lfc']
+    return dlfc
+
+
+def get_dlfc(df, ctl_genes):
+    """Calculate delta-LFC's
+
+    Model the LFC of each combination as the sum of each guide when paired with controls. The difference from this
+    expectation is the delta log2-fold change
+
+    Parameters
+    ----------
+    df: DataFrame
+        LFCs from combinatorial screen
+
+    Returns
+    -------
+    DataFrame:
+        delta LFCs for gene pairs
+    DataFrame:
+        delta LFCs for guide pairs
+    """
+    check_input(df)
+    anchor_df = build_anchor_df(df)
+    melted_anchor_df = melt_df(anchor_df)
+    base_lfcs = get_base_score(melted_anchor_df, ctl_genes)
+    melted_df = melt_df(df)
+    guide_dlfc = calc_dlfc(melted_df, base_lfcs)
+    ordered_dflc = order_genes(guide_dlfc)
+    avg_dlfc = get_avg_score(ordered_dflc, 'dlfc')
+    return avg_dlfc, guide_dlfc
+
+
 
 
 
