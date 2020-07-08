@@ -5,7 +5,7 @@ import numpy as np
 
 
 def check_input(df):
-    """Check whether input dataframe has expected format
+    """Check whether input DataFrame has expected format
 
     * Column 1 - first guide identifier
     * Column 2 - second guide identifier
@@ -88,7 +88,7 @@ def join_anchor_base_score(anchor_df, base_df):
     return joined_df
 
 
-def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
+def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target', y_col='lfc'):
     """Fit linear model for a single anchor guide paired with all target guides in a condition"""
     if fit_genes is not None:
         train_df = df.loc[df.target_gene.isin(fit_genes), :].copy()
@@ -97,23 +97,27 @@ def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
     train_x = sm.add_constant(train_df[x_col])
     model_fit = sm.OLS(train_df[y_col], train_x).fit()
     model_info = {'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue}
-    if fit_genes is not None:
-        test_df = df.copy()
-        predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
-        test_df['residual'] = test_df[x_col] - predictions
-    else:
-        test_df = train_df.copy()
-        test_df['residual'] = model_fit.resid
+    test_df = df.copy()
+    predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
+    test_df['residual'] = test_df[y_col] - predictions
     test_df['residual_z'] = (test_df['residual'] - test_df['residual'].mean())/test_df['residual'].std()
+    if scale:
+        prediction_results = model_fit.get_prediction(sm.add_constant(test_df[x_col]))
+        summary_frame = prediction_results.summary_frame(alpha=scale_alpha)  # summary frame has confidence interval for predictions
+        test_df[['mean_ci_lower', 'mean_ci_upper']] = summary_frame[['mean_ci_lower', 'mean_ci_upper']]
+        test_df['ci'] = test_df['mean_ci_upper'] - test_df['mean_ci_lower']
+        test_df['scaled_residual'] = test_df['residual']/test_df['ci']
+        test_df['scaled_residual_z'] = (test_df['scaled_residual'] -
+                                        test_df['scaled_residual'].mean()) / test_df['scaled_residual'].std()
     return model_info, test_df
 
 
-def fit_models(df, fit_genes):
+def fit_models(df, fit_genes, scale_resids):
     """Fit linear model for each anchor guide in each condition"""
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        model_info, residuals = fit_anchor_model(group_df, fit_genes)
+        model_info, residuals = fit_anchor_model(group_df, fit_genes, scale_resids)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['condition'] = guide_condition[1]
@@ -121,21 +125,29 @@ def fit_models(df, fit_genes):
     model_info_df = pd.DataFrame(model_info_list)
     residual_df = (pd.concat(residual_list, axis=0)
                    .reset_index(drop=True))
-    return model_info_df, residual_df
+    return residual_df, model_info_df
 
 
-def get_residuals(df, ctl_genes, fit_genes=None):
+def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False):
     """Calculate guide-level residuals
 
     Parameters
     ----------
-    df: DataFrame
+    lfc_df: DataFrame
         LFCs from combinatorial screen
+        * Column 1 - first guide identifier
+        * Column 2 - second guide identifier
+        * Column 3 - first gene identifier
+        * Column 4 - second gene identifier
+        * Column 5+ - LFC values from different conditions
     ctl_genes: list
         Negative control genes (e.g. nonessential, intronic, or no site)
-    fit_genes: list
+    fit_genes: list, optional
         Genes used to train each linear model. If None, uses all genes to fit. This can be helpful if we expect
         a large fraction of target_genes to be interactors
+    scale: bool, optional
+        Whether to scale residuals by the confidence interval at a fit point (experimental). The output will then
+        include a column "sclaed_residual" and "scaled_residual_z"
 
     Returns
     -------
@@ -145,13 +157,13 @@ def get_residuals(df, ctl_genes, fit_genes=None):
         Guide level residuals
 
     """
-    check_input(df)
-    anchor_df = build_anchor_df(df)
+    check_input(lfc_df)
+    anchor_df = build_anchor_df(lfc_df)
     melted_anchor_df = melt_df(anchor_df, fit_genes)
     guide_base_score = get_base_score(melted_anchor_df, ctl_genes)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
-    model_info_df, guide_residuals = fit_models(anchor_base_scores, fit_genes)
-    return model_info_df, guide_residuals
+    guide_residuals, model_info_df = fit_models(anchor_base_scores, fit_genes, scale)
+    return guide_residuals, model_info_df
 
 
 def order_genes(df):
@@ -171,17 +183,17 @@ def order_genes(df):
     return ordered_df
 
 
-def get_pop_stats(df):
-    """Get mean and standard deviation for z-scored residuals"""
+def get_pop_stats(df, stat):
+    """Get mean and standard deviation for z-scored a stat"""
     pop_stats = (df.groupby('condition')
-                 .agg(mean_residual=('residual_z', 'mean'),
-                      std_residual=('residual_z', 'std'))
+                 .agg(mean_stat=(stat, 'mean'),
+                      std_stat=(stat, 'std'))
                  .reset_index())
     return pop_stats
 
 
-def combine_residuals(df, pop_stats):
-    """Combine residuals for a gene pair
+def combine_statistic(df, pop_stats, stat):
+    """Combine a statistic for a gene pair
 
     .. math::
         (\bar x - \mu)/(\sigma / \sqrt{n})
@@ -192,9 +204,11 @@ def combine_residuals(df, pop_stats):
     Parameters
     ----------
     df: DataFrame
-        guide level residuals
+        guide level statistic
     pop_stats: DataFrame
         population stats
+    stat: str
+        statistic to combine
 
     Returns
     -------
@@ -202,31 +216,33 @@ def combine_residuals(df, pop_stats):
         z_score for gene combination
     """
     combo_stats = (df.groupby(['condition', 'gene_a', 'gene_b'])
-                   .agg(mean_residual=('residual_z', 'mean'),
-                        count=('residual_z', 'count'))
+                   .agg(mean_stat=(stat, 'mean'),
+                        count=(stat, 'count'))
                    .reset_index()
                    .merge(pop_stats, how='inner', on='condition',
                           suffixes=['', '_pop']))
-    combo_stats['z_score'] = ((combo_stats['mean_residual'] - combo_stats['mean_residual_pop']) /
-                              (combo_stats['std_residual'] / np.sqrt(combo_stats['count'])))
-    return combo_stats[['condition', 'gene_a', 'gene_b', 'z_score']]
+    combo_stats['z_score_' + stat] = ((combo_stats['mean_stat'] - combo_stats['mean_stat_pop']) /
+                                      (combo_stats['std_stat'] / np.sqrt(combo_stats['count'])))
+    return combo_stats[['condition', 'gene_a', 'gene_b', 'z_score_' + stat]]
 
 
 def get_avg_score(df, score):
-    """get avg lfc or any other score"""
+    """get avg lfc"""
     avg_score = (df.groupby(['condition', 'gene_a', 'gene_b'])
                  .agg({score: 'mean'})
                  .reset_index())
     return avg_score
 
 
-def get_gene_residuals(df):
+def get_gene_residuals(guide_residuals, stat='residual'):
     """Combine residuals at the gene level
 
     Parameters
     ----------
-    df: DataFrame
+    guide_residuals: DataFrame
         Guide level residuals
+    stat: str, optional
+        Statistic to combine at the gene level
 
     Returns
     -------
@@ -234,13 +250,13 @@ def get_gene_residuals(df):
         Gene level z_scores
 
     """
-    ordered_df = order_genes(df)
-    pop_stats = get_pop_stats(ordered_df)
-    gene_a_anchor_z = combine_residuals(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats)
-    gene_b_anchor_z = combine_residuals(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats)
-    combined_z = combine_residuals(ordered_df, pop_stats)
-    avg_score = get_avg_score(ordered_df, 'lfc')
-    gene_results = (avg_score.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
+    ordered_df = order_genes(guide_residuals)
+    pop_stats = get_pop_stats(ordered_df, stat)
+    gene_a_anchor_z = combine_statistic(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats, stat)
+    gene_b_anchor_z = combine_statistic(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats, stat)
+    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    avg_lfc = get_avg_score(ordered_df, 'lfc')
+    gene_results = (avg_lfc.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
                            on=['condition', 'gene_a', 'gene_b'], suffixes=['', '_gene_a_anchor'])
                     .merge(gene_b_anchor_z, how='inner',
@@ -253,43 +269,77 @@ def calc_dlfc(df, base_lfcs):
     guide1 = df.columns[0]
     guide2 = df.columns[1]
     dlfc = (df.merge(base_lfcs, how='inner', left_on=[guide1, 'condition'],
-                            right_on=['anchor_guide', 'condition'], suffixes=['', '_' + guide1 + '_base'])
+                     right_on=['anchor_guide', 'condition'], suffixes=['', '_' + guide1 + '_base'])
             .drop('anchor_guide', axis=1)
             .merge(base_lfcs, how='inner', left_on=[guide2, 'condition'],
                    right_on=['anchor_guide', 'condition'], suffixes=['', '_' + guide2 + '_base'])
             .drop('anchor_guide', axis=1))
     dlfc['sum_lfc'] = dlfc['lfc_' + guide1 + '_base'] + dlfc['lfc_' + guide2 + '_base']
     dlfc['dlfc'] = dlfc['lfc'] - dlfc['sum_lfc']
+    dlfc['dlfc_z'] = (dlfc.groupby('condition')
+                      .dlfc
+                      .transform(lambda x: (x - x.mean())/x.std()))
     return dlfc
 
 
-def get_dlfc(df, ctl_genes):
-    """Calculate delta-LFC's
+def get_guide_dlfcs(lfc_df, ctl_genes):
+    """Calculate delta-LFC's at the guide level
 
     Model the LFC of each combination as the sum of each guide when paired with controls. The difference from this
     expectation is the delta log2-fold change
 
     Parameters
     ----------
-    df: DataFrame
+    lfc_df: DataFrame
         LFCs from combinatorial screen
+        * Column 1 - first guide identifier
+        * Column 2 - second guide identifier
+        * Column 3 - first gene identifier
+        * Column 4 - second gene identifier
+        * Column 5+ - LFC values from different conditions
+    ctl_genes: list
+        Negative control genes (e.g. nonessential, intronic, or no site)
 
     Returns
     -------
     DataFrame:
-        delta LFCs for gene pairs
-    DataFrame:
         delta LFCs for guide pairs
     """
-    check_input(df)
-    anchor_df = build_anchor_df(df)
+    check_input(lfc_df)
+    #  get base lfcs using anchor framework
+    anchor_df = build_anchor_df(lfc_df)
     melted_anchor_df = melt_df(anchor_df)
     base_lfcs = get_base_score(melted_anchor_df, ctl_genes)
-    melted_df = melt_df(df)
+    #  calculate delta-log-fold changes without generating an anchor df
+    melted_df = melt_df(lfc_df)
     guide_dlfc = calc_dlfc(melted_df, base_lfcs)
-    ordered_dflc = order_genes(guide_dlfc)
-    avg_dlfc = get_avg_score(ordered_dflc, 'dlfc')
-    return avg_dlfc, guide_dlfc
+    return guide_dlfc
+
+
+def get_gene_dlfcs(guide_dlfcs, stat='dlfc'):
+    """Combine dLFCs at the gene level
+
+    Parameters
+    ----------
+    guide_dlfcs: DataFrame
+        Guide level dLFCs
+    stat: str, optional
+        Statistic to combine at the gene level
+
+    Returns
+    -------
+    DataFrame
+        Gene level z_scores
+
+    """
+    ordered_df = order_genes(guide_dlfcs)
+    pop_stats = get_pop_stats(ordered_df, stat)
+    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    avg_lfc = get_avg_score(ordered_df, 'lfc')
+    gene_results = (avg_lfc.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b']))
+    return gene_results
+
+
 
 
 
