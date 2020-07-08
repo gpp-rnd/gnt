@@ -109,7 +109,7 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
         test_df['scaled_residual'] = test_df['residual']/test_df['ci']
         test_df['scaled_residual_z'] = (test_df['scaled_residual'] -
                                         test_df['scaled_residual'].mean()) / test_df['scaled_residual'].std()
-    return model_info, test_df
+    return test_df, model_info
 
 
 def fit_models(df, fit_genes, scale_resids):
@@ -117,7 +117,7 @@ def fit_models(df, fit_genes, scale_resids):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        model_info, residuals = fit_anchor_model(group_df, fit_genes, scale_resids)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes, scale_resids)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['condition'] = guide_condition[1]
@@ -215,15 +215,21 @@ def combine_statistic(df, pop_stats, stat):
     DataFrame
         z_score for gene combination
     """
+    guide1 = df.columns[0]
+    guide2 = df.columns[1]
     combo_stats = (df.groupby(['condition', 'gene_a', 'gene_b'])
-                   .agg(mean_stat=(stat, 'mean'),
-                        count=(stat, 'count'))
+                   .agg(mean_stat=(stat, 'mean'))
                    .reset_index()
                    .merge(pop_stats, how='inner', on='condition',
                           suffixes=['', '_pop']))
+    guide_pair_df = (df.groupby(['condition', 'gene_a', 'gene_b'])
+                     .apply(lambda d: len({frozenset(x) for x in zip(d[guide1], d[guide2])}))  # use sets to count
+                     # # unique guide pairs
+                     .reset_index(name='guide_pairs'))
+    combo_stats = combo_stats.merge(guide_pair_df, how='inner', on=['condition', 'gene_a', 'gene_b'])
     combo_stats['z_score_' + stat] = ((combo_stats['mean_stat'] - combo_stats['mean_stat_pop']) /
-                                      (combo_stats['std_stat'] / np.sqrt(combo_stats['count'])))
-    return combo_stats[['condition', 'gene_a', 'gene_b', 'z_score_' + stat]]
+                                      (combo_stats['std_stat'] / np.sqrt(combo_stats['guide_pairs'])))
+    return combo_stats[['condition', 'gene_a', 'gene_b', 'guide_pairs', 'z_score_' + stat]]
 
 
 def get_avg_score(df, score):
@@ -258,9 +264,9 @@ def get_gene_residuals(guide_residuals, stat='residual'):
     avg_lfc = get_avg_score(ordered_df, 'lfc')
     gene_results = (avg_lfc.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b'], suffixes=['', '_gene_a_anchor'])
+                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_a_anchor'])
                     .merge(gene_b_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b'], suffixes=['', '_gene_b_anchor']))
+                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_b_anchor']))
     return gene_results
 
 
