@@ -54,7 +54,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     guide_base_score = score.get_base_score(melted_anchor_df, ['HPRT intron', 'CD81'])
     anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
     train_df = anchor_base_scores.loc[(anchor_base_scores.anchor_guide == 'GCTGTATCCTTTCTGGGAAAG') &
-                                      (anchor_base_scores.condition == 'Day 21_Meljuso'), :] # BCL2L1 guide
+                                      (anchor_base_scores.condition == 'Day 21_Meljuso'), :]  # BCL2L1 guide
     residuals, model_info = score.fit_anchor_model(train_df, None, False)
     assert model_info['R2'] > 0.5
     gene_residuals = (residuals.groupby('target_gene')
@@ -65,8 +65,8 @@ def test_fit_anchor_model(bigpapi_lfcs):
     assert gene_residuals['target_gene'].iloc[-1] == 'BCL2L1'
     # test scale
     residuals, model_info = score.fit_anchor_model(train_df, None, True)
-    residuals['scaled_pct_rank'] = residuals.scaled_residual_z.abs().rank(pct = True)
-    residuals['unscaled_pct_rank'] = residuals.residual_z.abs().rank(pct = True)
+    residuals['scaled_pct_rank'] = residuals.scaled_residual_z.abs().rank(pct=True)
+    residuals['unscaled_pct_rank'] = residuals.residual_z.abs().rank(pct=True)
     eef2_pct_rank = (residuals[residuals.target_gene == 'EEF2']
                      .agg({'scaled_pct_rank': 'mean',
                            'unscaled_pct_rank': 'mean'}))
@@ -87,7 +87,7 @@ def test_get_residual(bigpapi_lfcs):
 
 
 def test_order_genes():
-    genes = pd.DataFrame({'guide1': [1,2,3], 'guide2': [1,2,3],
+    genes = pd.DataFrame({'guide1': [1, 2, 3], 'guide2': [1, 2, 3],
                           'anchor_gene': ['A', 'B', 'B'], 'target_gene': ['B', 'B', 'A']})
     ordered_genes = score.order_genes(genes)
     expected_order = genes.copy()
@@ -113,12 +113,12 @@ def test_get_gene_residuals(bigpapi_lfcs):
 def test_get_guide_dlfc(bigpapi_lfcs):
     guide_dlfcs = gnt.get_guide_dlfcs(bigpapi_lfcs, ['HPRT intron', 'CD81'])
     assert ((guide_dlfcs.groupby(['U6 gene', 'H1 gene', 'condition'])
-      .agg({'dlfc_z': 'mean'})
-      .sort_values('dlfc_z')
-      .reset_index()
-      .head(1)
-      [['U6 gene', 'H1 gene']]
-      .values) == [['MCL1', 'BCL2L1']]).all()
+             .agg({'dlfc_z': 'mean'})
+             .sort_values('dlfc_z')
+             .reset_index()
+             .head(1)
+             [['U6 gene', 'H1 gene']]
+             .values) == [['MCL1', 'BCL2L1']]).all()
 
 
 def test_get_gene_dlfc(bigpapi_lfcs):
