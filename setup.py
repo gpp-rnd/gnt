@@ -10,7 +10,7 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['Click>=7.0', ]
+requirements = ['Click>=7.0', 'pandas>=1.0', 'numpy>=1.19', 'statsmodels>=0.11']
 
 setup_requirements = ['pytest-runner', ]
 
@@ -19,7 +19,7 @@ test_requirements = ['pytest>=3', ]
 setup(
     author="Peter C. DeWeirdt",
     author_email='petedeweirdt@gmail.com',
-    python_requires='>=3.5',
+    python_requires='>=3.7',
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
