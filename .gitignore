@@ -107,3 +107,6 @@ Pipfile.lock
 .vscode/
 .idea/
 
+# venv settings
+Pipfile
+Pipfile.lock
