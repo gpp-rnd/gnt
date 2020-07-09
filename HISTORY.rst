@@ -11,3 +11,8 @@ History
 ------------------
 
 * Automated release
+
+0.1.2 (2020-07-09)
+------------------
+
+* Travis bug fix
