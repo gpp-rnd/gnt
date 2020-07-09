@@ -7,11 +7,11 @@ import numpy as np
 def check_input(df):
     """Check whether input DataFrame has expected format
 
-    * Column 1 - first guide identifier
-    * Column 2 - second guide identifier
-    * Column 3 - first gene identifier
-    * Column 4 - second gene identifier
-    * Column 5+ - LFC values from different conditions
+    - Column 1: first guide identifier
+    - Column 2: second guide identifier
+    - Column 3: first gene identifier
+    - Column 4: second gene identifier
+    - Column 5+: LFC values from different conditions
 
     Parameters
     ----------
@@ -196,9 +196,9 @@ def combine_statistic(df, pop_stats, stat):
     """Combine a statistic for a gene pair
 
     .. math::
-        (\bar x - \mu)/(\sigma / \sqrt{n})
+        (x - \mu)/(\sigma / \sqrt{n})
 
-    Where :math:`\bar x, \mu, \sigma` are the sample mean, population mean, and population standard deviation of
+    Where :math:`x, \mu, \sigma` are the sample mean, population mean, and population standard deviation of
     residuals, and :math:`n` is the number of guide pairs.
 
     Parameters
@@ -298,11 +298,12 @@ def get_guide_dlfcs(lfc_df, ctl_genes):
     ----------
     lfc_df: DataFrame
         LFCs from combinatorial screen
-        * Column 1 - first guide identifier
-        * Column 2 - second guide identifier
-        * Column 3 - first gene identifier
-        * Column 4 - second gene identifier
-        * Column 5+ - LFC values from different conditions
+
+        - Column 1: first guide identifier
+        - Column 2: second guide identifier
+        - Column 3: first gene identifier
+        - Column 4: second gene identifier
+        - Column 5+: LFC values from different conditions
     ctl_genes: list
         Negative control genes (e.g. nonessential, intronic, or no site)
 
