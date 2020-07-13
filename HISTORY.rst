@@ -22,3 +22,8 @@ History
 
 * Add columns to guide and gene output for base LFC of pairs
 * Check inputs, removing guides without the right number of pairs or control pairs
+
+
+0.2.1 (2020-07-13)
+------------------
+* Update basic usage notebook
