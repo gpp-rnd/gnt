@@ -10,6 +10,7 @@ from gnt import cli
 from gnt import score
 import gnt
 import pandas as pd
+import warnings
 
 
 def test_command_line_interface():
@@ -75,7 +76,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     assert model_info['f_pvalue'] < ctl_model_info['f_pvalue']
 
 
-def test_get_residual(bigpapi_lfcs):
+def test_get_guide_residuals(bigpapi_lfcs):
     guide_residuals, model_info_df = gnt.get_guide_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'])
     assert ((guide_residuals.groupby(['anchor_gene', 'target_gene', 'condition'])
              .agg({'residual_z': 'mean'})
@@ -128,3 +129,47 @@ def test_get_gene_dlfc(bigpapi_lfcs):
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['BCL2L1', 'MCL1']]).all()
+
+
+def test_get_base_lfc_from_resid(bigpapi_lfcs):
+    guide_residuals, _ = gnt.get_guide_residuals(bigpapi_lfcs, ['HPRT intron', 'CD81'])
+    gene_base_lfcs = gnt.score.get_base_lfc_from_resid(guide_residuals)
+    assert ((gene_base_lfcs
+             .sort_values('base_lfc')
+             ['gene']
+             .values[0]) == 'EEF2')
+
+
+def test_warn_controls(bigpapi_lfcs):
+    ctl_genes = ['CD81', 'HPRT intron']
+    bcl2l1_no_control = bigpapi_lfcs[~(((bigpapi_lfcs.iloc[:, 2] == 'BCL2L1') & bigpapi_lfcs.iloc[:, 3].isin(ctl_genes)) |
+                                       ((bigpapi_lfcs.iloc[:, 3] == 'BCL2L1') & bigpapi_lfcs.iloc[:, 2].isin(ctl_genes)))]
+    anchor_df = gnt.score.build_anchor_df(bcl2l1_no_control)
+    melted_anchor_df = gnt.score.melt_df(anchor_df, None)
+    guide_base_score = gnt.score.get_base_score(melted_anchor_df, ctl_genes)
+    no_control_guides = gnt.score.get_no_control_guides(melted_anchor_df, guide_base_score)
+    assert len(no_control_guides) == 6  # 3 Sa and 3 Sp
+    with warnings.catch_warnings(record=True) as w:
+        gnt.score.warn_no_control_guides(anchor_df, no_control_guides)
+        assert len(w) == 1
+        assert '6' in str(w[0].message)
+
+
+def test_filter_anchor_base_scores(bigpapi_lfcs):
+    ctl_genes = ['CD81', 'HPRT intron']
+    bcl2l1_no_pairs = bigpapi_lfcs[~(((bigpapi_lfcs.iloc[:, 2] == 'BCL2L1') &
+                                      ~(bigpapi_lfcs.iloc[:, 1] == 'AAAAAAAGAGTCGAATGTTTT')) |
+                                     ((bigpapi_lfcs.iloc[:, 3] == 'BCL2L1') &
+                                      ~(bigpapi_lfcs.iloc[:, 0] == 'AAAGTGGAACTCAGGACATG')))]
+    anchor_df = gnt.score.build_anchor_df(bcl2l1_no_pairs)
+    melted_anchor_df = gnt.score.melt_df(anchor_df, None)
+    guide_base_score = gnt.score.get_base_score(melted_anchor_df, ctl_genes)
+    anchor_base_scores = gnt.score.join_anchor_base_score(melted_anchor_df, guide_base_score)
+    guides_no_pairs = gnt.score.check_min_guide_pairs(anchor_base_scores, 5)
+    assert len(guides_no_pairs) == 6
+    with warnings.catch_warnings(record=True) as w:
+        filtered_anchor_base_scores = gnt.score.filter_anchor_base_scores(anchor_base_scores, 5)
+        assert len(w) == 1
+        assert '6' in str(w[0].message)
+        assert filtered_anchor_base_scores.shape[0] < anchor_base_scores.shape[0]
+        assert filtered_anchor_base_scores.shape[0] > 0

@@ -2,9 +2,10 @@
 import pandas as pd
 import statsmodels.api as sm
 import numpy as np
+import warnings
 
 
-def check_input(df):
+def check_guide_input(df):
     """Check whether input DataFrame has expected format
 
     - Column 1: first guide identifier
@@ -96,6 +97,64 @@ def get_base_score(df, ctl_genes):
     return base_score
 
 
+def get_no_control_guides(df, guide_base_score):
+    """Get guides that are not paired with controls
+
+    Parameters
+    ----------
+    df: DataFrame
+        DataFrame with the column anchor_gene
+    guide_base_score: DataFrame
+        Guide scores when paired with controls
+
+    Returns
+    -------
+    list
+        Guides without control pairs
+    """
+    starting_guides = set(df.anchor_guide.to_list())
+    base_score_guides = set(guide_base_score.anchor_guide.to_list())
+    no_control_guides = list(starting_guides - base_score_guides)
+    return no_control_guides
+
+
+def get_removed_guides_genes(anchor_df, guides):
+    """Get dataframe of removed guides and genes
+
+    Parameters
+    ----------
+    anchor_df: DataFrame
+    guides: list
+        List of guides being removed
+
+    Returns
+    -------
+    DataFrame
+    """
+    remove_anchor = (anchor_df.loc[anchor_df.anchor_guide.isin(guides),
+                                   ['anchor_guide', 'anchor_gene']]
+                     .rename({'anchor_guide': 'guide', 'anchor_gene': 'gene'}, axis=1))
+    return remove_anchor
+
+
+def warn_no_control_guides(anchor_df, no_control_guides):
+    """Give warning for guides with control pairs
+
+    Parameters
+    ----------
+    anchor_df: DataFrame
+    no_control_guides: list
+
+    Warnings
+    --------
+    Guides without control pairs
+    """
+    if len(no_control_guides) > 0:
+        removed_genes = get_removed_guides_genes(anchor_df, no_control_guides)
+        warnings.warn('There are ' + str(len(no_control_guides)) + ' guides without control pairs:\n' +
+                      str(removed_genes))
+
+
 def join_anchor_base_score(anchor_df, base_df):
     """Join anchor DataFrame with Base LFCs on anchor_guide
 
@@ -114,6 +173,74 @@ def join_anchor_base_score(anchor_df, base_df):
                                  right_on=['anchor_guide', 'condition'], suffixes=['', '_target'])
                  .drop('anchor_guide_target', axis=1))
     return joined_df
+
+
+def check_min_guide_pairs(df, min_pairs):
+    """Check that each guide is paired with a minimum number of guides
+
+    Parameters
+    ----------
+    df: DataFrame
+        Anchor df with column anchor_guide
+    min_pairs: int
+        minimum number of guides to be paired with
+
+    Returns
+    -------
+    List
+        guides that are not paired fewer than min_pairs number of guides
+    """
+    pair_count = (df[['anchor_guide', 'target_guide']]
+                  .drop_duplicates()
+                  .groupby('anchor_guide')
+                  .apply(lambda df: df.shape[0])
+                  .reset_index(name='n'))
+    guides_no_pairs = pair_count.anchor_guide[~(pair_count.n >= min_pairs)].to_list()
+    return guides_no_pairs
+
+
+def remove_guides(df, rm_guides):
+    """Remove guides from DataFrame
+
+    Parameters
+    ----------
+    df: DataFrame
+        Dataframe with columns for guides
+    rm_guides: list
+        List of guides to remove
+
+    Returns
+    -------
+    DataFrame
+        Filtered to remove guides
+    """
+    df = df[~(df.anchor_guide.isin(rm_guides))]
+    return df
+
+
+def filter_anchor_base_scores(df, min_pairs):
+    """Filter guides that are not in with a certain number of pairs
+
+    Parameters
+    ----------
+    df: DataFrame
+        DataFrame with column anchor_guide
+    min_pairs: int
+        Minimum number of pairs for an anchor_guide
+
+    Returns
+    -------
+    DataFrame
+        Filtered dataframe if there are guides without the minimum number of guide pairs
+    """
+    guides_no_pairs = check_min_guide_pairs(df, min_pairs)
+    if len(guides_no_pairs) > 0:
+        removed_genes = get_removed_guides_genes(df, guides_no_pairs)
+        warnings.warn('Removed ' + str(len(guides_no_pairs)) + ' guides with fewer than ' +
+                      str(min_pairs) + ' pairs:\n' + str(removed_genes))
+        filtered_anchor_base_scores = remove_guides(df, guides_no_pairs)
+        return filtered_anchor_base_scores
+    return df
 
 
 def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target', y_col='lfc'):
@@ -188,6 +315,7 @@ def fit_models(df, fit_genes, scale_resids):
         residuals, model_info = fit_anchor_model(group_df, fit_genes, scale_resids)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
+        model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
         model_info['condition'] = guide_condition[1]
         model_info_list.append(model_info)
     model_info_df = pd.DataFrame(model_info_list)
@@ -196,7 +324,8 @@ def fit_models(df, fit_genes, scale_resids):
     return residual_df, model_info_df
 
 
-def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False):
+def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
+                        min_pairs=5):
     """Calculate guide-level residuals
 
     Parameters
@@ -216,6 +345,8 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False):
     scale: bool, optional
         Whether to scale residuals by the confidence interval at a fit point (experimental). The output will then
         include a column "sclaed_residual" and "scaled_residual_z"
+    min_pairs: int, optional
+        Minimum number of pairs a guide must be in
 
     Returns
     -------
@@ -224,30 +355,37 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False):
     DataFrame
         R-squared and f-statistic p-value for each linear model
     """
-    check_input(lfc_df)
+    check_guide_input(lfc_df)
     anchor_df = build_anchor_df(lfc_df)
     melted_anchor_df = melt_df(anchor_df, fit_genes)
     guide_base_score = get_base_score(melted_anchor_df, ctl_genes)
+    no_control_guides = get_no_control_guides(melted_anchor_df, guide_base_score)
+    warn_no_control_guides(anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
-    guide_residuals, model_info_df = fit_models(anchor_base_scores, fit_genes, scale)
+    filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
+    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, scale)
     return guide_residuals, model_info_df
 
 
-def order_genes(df):
+def order_genes(df, gene_cols=None):
     """Reorder anchor and target genes to be in alphabetical order
 
     Parameters
     ----------
     df: DataFrame
-        3rd and 4th columns represent gene 1 and gene 2
+        DataFrame with columns representing gene 1 and gene 2
+    gene_cols: List, optional
+        Indices of gene 1 and gene 2 columns. Defaults to column 3 and 4 if None supplied
 
     Returns
     -------
     DataFrame
         with columns gene_a and gene_b
     """
-    gene1 = df.columns[2]
-    gene2 = df.columns[3]
+    if gene_cols is None:
+        gene_cols = [2, 3]
+    gene1 = df.columns[gene_cols[0]]
+    gene2 = df.columns[gene_cols[1]]
     anchor_target_df = df[[gene1, gene2]].drop_duplicates()
     anchor_target_df['gene_a'] = anchor_target_df.apply(lambda row: (row[gene1] if
                                                                      row[gene1] <= row[gene2]
@@ -344,7 +482,29 @@ def get_avg_score(df, score):
     return avg_score
 
 
-def get_gene_residuals(guide_residuals, stat='residual'):
+def get_base_lfc_from_resid(residual_df):
+    """Calculate gene level base lfcs from the guide-level residual dataframe
+
+    Parameters
+    ----------
+    residual_df: DataFrame
+        DataFrame of residuals
+
+    Returns
+    -------
+    DataFrame
+        With columns gene, condition, base_lfc
+    """
+    gene_base_lfcs = (residual_df[['target_gene', 'condition', 'lfc_target']]
+                      .drop_duplicates()
+                      .groupby(['target_gene', 'condition'])
+                      .agg({'lfc_target': 'mean'})
+                      .reset_index()
+                      .rename({'lfc_target': 'base_lfc', 'target_gene': 'gene'}, axis=1))
+    return gene_base_lfcs
+
+
+def get_gene_residuals(guide_residuals, stat='residual_z'):
     """Combine residuals at the gene level
 
     Parameters
@@ -353,6 +513,8 @@ def get_gene_residuals(guide_residuals, stat='residual'):
         Guide level residuals
     stat: str, optional
         Statistic to combine at the gene level
+    min_pairs: int, optional
+        Minimum number of gene pairs for a gene to be considered
 
     Returns
     -------
@@ -365,7 +527,14 @@ def get_gene_residuals(guide_residuals, stat='residual'):
     gene_b_anchor_z = combine_statistic(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats, stat)
     combined_z = combine_statistic(ordered_df, pop_stats, stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
-    gene_results = (avg_lfc.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
+    base_lfcs = get_base_lfc_from_resid(guide_residuals)
+    gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],
+                                  right_on=['condition', 'gene'])
+                    .drop('gene', axis=1)
+                    .merge(base_lfcs, how='inner', left_on=['condition', 'gene_b'],
+                           right_on=['condition', 'gene'], suffixes=['_a', '_b'])
+                    .drop('gene', axis=1)
+                    .merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
                            on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_a_anchor'])
                     .merge(gene_b_anchor_z, how='inner',
@@ -428,7 +597,7 @@ def get_guide_dlfcs(lfc_df, ctl_genes):
     DataFrame:
         delta LFCs for guide pairs
     """
-    check_input(lfc_df)
+    check_guide_input(lfc_df)
     #  get base lfcs using anchor framework
     anchor_df = build_anchor_df(lfc_df)
     melted_anchor_df = melt_df(anchor_df)
