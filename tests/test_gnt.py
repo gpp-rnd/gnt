@@ -40,6 +40,12 @@ def test_build_anchor_df(bigpapi_lfcs):
     anchor_df = score.build_anchor_df(bigpapi_lfcs)
     assert anchor_df.shape[0] == bigpapi_lfcs.shape[0]*2
     assert anchor_df.anchor_guide.value_counts().median() == (25*3+3+10+5+3)
+    toy_df = pd.DataFrame({'guide1': ['a', 'a', 'b'], 'guide2': ['a', 'a', 'a'], 'gene1': ['A', 'A', 'B'],
+                           'gene2': ['A', 'A', 'A']})
+    toy_anchor_df = score.build_anchor_df(toy_df)
+    expected_output = pd.DataFrame({'anchor_guide': ['a', 'b', 'a'], 'target_guide': ['a', 'a', 'b'],
+                                    'anchor_gene': ['A', 'B', 'A'], 'target_gene': ['A', 'A', 'B']})
+    pd.testing.assert_frame_equal(toy_anchor_df, expected_output)
 
 
 def test_guide_base_score(bigpapi_lfcs):
