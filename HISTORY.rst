@@ -33,3 +33,8 @@ History
 ------------------
 
 * Aggregate guide scores that are in data multiple times in different orientations
+
+0.2.3 (2020-07-15)
+------------------
+
+* Deduplicate repeat guide pairs in anchor df
