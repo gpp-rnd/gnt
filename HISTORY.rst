@@ -26,4 +26,10 @@ History
 
 0.2.1 (2020-07-13)
 ------------------
+
 * Update basic usage notebook
+
+0.2.2 (2020-07-15)
+------------------
+
+* Aggregate guide scores that are in data multiple times in different orientations
