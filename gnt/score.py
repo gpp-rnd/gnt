@@ -27,30 +27,6 @@ def check_guide_input(df):
         raise ValueError('The first two columns of input (guide 1 and guide 2) should uniquely identify each row')
 
 
-def build_anchor_df(df):
-    """Build a dataframe where each guide is defined as an anchor and is paired with all other target guides
-
-    Parameters
-    ----------
-    df: DataFrame
-        LFC df
-
-    Returns
-    -------
-    DataFrame
-    """
-    df_columns = df.columns
-    forward_df = (df
-                  .rename({df_columns[0]: 'anchor_guide', df_columns[1]: 'target_guide',
-                           df_columns[2]: 'anchor_gene', df_columns[3]: 'target_gene'}, axis=1))
-    reverse_df = (df
-                  .rename({df_columns[1]: 'anchor_guide', df_columns[0]: 'target_guide',
-                           df_columns[3]: 'anchor_gene', df_columns[2]: 'target_gene'}, axis=1))
-    anchor_df = (pd.concat([forward_df, reverse_df])
-                 .reset_index(drop=True))
-    return anchor_df
-
-
 def melt_df(df, id_cols=None, var_name='condition', value_name='lfc'):
     """Helper function to melt a DataFrame
 
@@ -73,6 +49,104 @@ def melt_df(df, id_cols=None, var_name='condition', value_name='lfc'):
         id_cols = df.columns[0:4]  # guide1, guide2, gene1, gene2
     melted_df = df.melt(id_vars=id_cols, var_name=var_name, value_name=value_name)
     return melted_df
+
+
+def order_cols(df, cols, name):
+    """Reorder values in columns to be in alphabetical order
+
+    Parameters
+    ----------
+    df: DataFrame
+        DataFrame with at least two columns to be reodredered in alphabetical order
+    cols: List
+        Indices of columns to be reordered
+    name: str
+        Name of reordered column
+
+    Returns
+    -------
+    DataFrame
+        With columns in alphabetical order
+    """
+    col1 = df.columns[cols[0]]
+    col2 = df.columns[cols[1]]
+    two_col_df = df[[col1, col2]].drop_duplicates()
+    two_col_df[name + '_a'] = two_col_df.apply(lambda row: (row[col1] if row[col1] <= row[col2]
+                                                            else row[col2]), axis=1)
+    two_col_df[name + '_b'] = two_col_df.apply(lambda row: (row[col2] if row[col1] <= row[col2]
+                                                            else row[col1]), axis=1)
+    ordered_df = df.merge(two_col_df, how='inner', on=[col1, col2])
+    return ordered_df
+
+
+def order_cols_with_meta(df, cols, meta_cols, col_name, meta_name):
+    """Reorder values in columns to be in alphabetical order, keeping track of columns with
+    meta-information
+
+    Parameters
+    ----------
+    df: DataFrame
+        DataFrame with at least two columns to be reordered in alphabetical order
+    cols: List
+        Indices of columns to be reordered
+    meta_cols: List
+        Indices of columns with meta information, ordered the same as cols
+    col_name: str
+        Base name of reordered columns
+    meta_name: str
+        Base name of meta information columns
+
+    Returns
+    -------
+    DataFrame
+        With columns in alphabetical order and their respective meta info
+    """
+    col1 = df.columns[cols[0]]
+    meta_col1 = df.columns[meta_cols[0]]
+    col2 = df.columns[cols[1]]
+    meta_col2 = df.columns[meta_cols[1]]
+    four_col_df = df[[col1, col2, meta_col1, meta_col2]].drop_duplicates()
+    four_col_df[col_name + '_a'] = four_col_df.apply(lambda row: (row[col1] if row[col1] <= row[col2]
+                                                                  else row[col2]), axis=1)
+    four_col_df[col_name + '_a_' + meta_name] = four_col_df.apply(lambda row: (row[meta_col1] if row[col1] <= row[col2]
+                                                                  else row[meta_col2]), axis=1)
+    four_col_df[col_name + '_b'] = four_col_df.apply(lambda row: (row[col2] if row[col1] <= row[col2]
+                                                                  else row[col1]), axis=1)
+    four_col_df[col_name + '_b_' + meta_name] = four_col_df.apply(lambda row: (row[meta_col2] if row[col1] <= row[col2]
+                                                                  else row[meta_col1]), axis=1)
+    ordered_df = df.merge(four_col_df, how='inner', on=[col1, col2])
+    return ordered_df
+
+
+def aggregate_guide_lfcs(df):
+    agg_lfcs = (df.groupby(['guide_a', 'guide_b', 'guide_a_gene', 'guide_b_gene', 'condition'])
+                .agg({'lfc': 'mean'})
+                .reset_index())
+    return agg_lfcs
+
+
+def build_anchor_df(df):
+    """Build a dataframe where each guide is defined as an anchor and is paired with all other target guides
+
+    Parameters
+    ----------
+    df: DataFrame
+        LFC df
+
+    Returns
+    -------
+    DataFrame
+    """
+    df_columns = df.columns
+    forward_df = (df
+                  .rename({df_columns[0]: 'anchor_guide', df_columns[1]: 'target_guide',
+                           df_columns[2]: 'anchor_gene', df_columns[3]: 'target_gene'}, axis=1))
+    reverse_df = (df
+                  .rename({df_columns[1]: 'anchor_guide', df_columns[0]: 'target_guide',
+                           df_columns[3]: 'anchor_gene', df_columns[2]: 'target_gene'}, axis=1))
+    anchor_df = (pd.concat([forward_df, reverse_df])
+                 .reset_index(drop=True))
+    return anchor_df
 
 
 def get_base_score(df, ctl_genes):
@@ -133,7 +207,8 @@ def get_removed_guides_genes(anchor_df, guides):
     """
     remove_anchor = (anchor_df.loc[anchor_df.anchor_guide.isin(guides),
                                    ['anchor_guide', 'anchor_gene']]
-                     .rename({'anchor_guide': 'guide', 'anchor_gene': 'gene'}, axis=1))
+                     .rename({'anchor_guide': 'guide', 'anchor_gene': 'gene'}, axis=1)
+                     .drop_duplicates())
     return remove_anchor
 
 
@@ -152,7 +227,7 @@ def warn_no_control_guides(anchor_df, no_control_guides):
     if len(no_control_guides) > 0:
         removed_genes = get_removed_guides_genes(anchor_df, no_control_guides)
         warnings.warn('There are ' + str(len(no_control_guides)) + ' guides without control pairs:\n' +
-                      str(removed_genes))
+                      str(removed_genes), stacklevel=2)
 
 
 def join_anchor_base_score(anchor_df, base_df):
@@ -237,7 +312,7 @@ def filter_anchor_base_scores(df, min_pairs):
     if len(guides_no_pairs) > 0:
         removed_genes = get_removed_guides_genes(df, guides_no_pairs)
         warnings.warn('Removed ' + str(len(guides_no_pairs)) + ' guides with fewer than ' +
-                      str(min_pairs) + ' pairs:\n' + str(removed_genes))
+                      str(min_pairs) + ' pairs:\n' + str(removed_genes), stacklevel=2)
         filtered_anchor_base_scores = remove_guides(df, guides_no_pairs)
         return filtered_anchor_base_scores
     return df
@@ -281,7 +356,8 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
     test_df['residual_z'] = (test_df['residual'] - test_df['residual'].mean())/test_df['residual'].std()
     if scale:
         prediction_results = model_fit.get_prediction(sm.add_constant(test_df[x_col]))
-        summary_frame = prediction_results.summary_frame(alpha=scale_alpha)  # summary frame has confidence interval for predictions
+        summary_frame = prediction_results.summary_frame(alpha=scale_alpha)  # summary frame has confidence interval
+        # for predictions
         test_df[['mean_ci_lower', 'mean_ci_upper']] = summary_frame[['mean_ci_lower', 'mean_ci_upper']]
         test_df['ci'] = test_df['mean_ci_upper'] - test_df['mean_ci_lower']
         test_df['scaled_residual'] = test_df['residual']/test_df['ci']
@@ -356,47 +432,17 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
         R-squared and f-statistic p-value for each linear model
     """
     check_guide_input(lfc_df)
-    anchor_df = build_anchor_df(lfc_df)
-    melted_anchor_df = melt_df(anchor_df, fit_genes)
+    melted_lfc_df = melt_df(lfc_df)
+    reordered_guides = order_cols_with_meta(melted_lfc_df, [0, 1], [2, 3], 'guide', 'gene')
+    dedup_guide_lfcs = aggregate_guide_lfcs(reordered_guides)
+    melted_anchor_df = build_anchor_df(dedup_guide_lfcs)
     guide_base_score = get_base_score(melted_anchor_df, ctl_genes)
     no_control_guides = get_no_control_guides(melted_anchor_df, guide_base_score)
-    warn_no_control_guides(anchor_df, no_control_guides)
+    warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
     filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
     guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, scale)
     return guide_residuals, model_info_df
-
-
-def order_genes(df, gene_cols=None):
-    """Reorder anchor and target genes to be in alphabetical order
-
-    Parameters
-    ----------
-    df: DataFrame
-        DataFrame with columns representing gene 1 and gene 2
-    gene_cols: List, optional
-        Indices of gene 1 and gene 2 columns. Defaults to column 3 and 4 if None supplied
-
-    Returns
-    -------
-    DataFrame
-        with columns gene_a and gene_b
-    """
-    if gene_cols is None:
-        gene_cols = [2, 3]
-    gene1 = df.columns[gene_cols[0]]
-    gene2 = df.columns[gene_cols[1]]
-    anchor_target_df = df[[gene1, gene2]].drop_duplicates()
-    anchor_target_df['gene_a'] = anchor_target_df.apply(lambda row: (row[gene1] if
-                                                                     row[gene1] <= row[gene2]
-                                                                     else row[gene2]),
-                                                        axis=1)
-    anchor_target_df['gene_b'] = anchor_target_df.apply(lambda row: (row[gene2] if
-                                                                     row[gene1] <= row[gene2]
-                                                                     else row[gene1]),
-                                                        axis=1)
-    ordered_df = df.merge(anchor_target_df, how='inner', on=[gene1, gene2])
-    return ordered_df
 
 
 def get_pop_stats(df, stat):
@@ -521,7 +567,7 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
     DataFrame
         Gene level z_scores
     """
-    ordered_df = order_genes(guide_residuals)
+    ordered_df = order_cols(guide_residuals, [2, 3], 'gene')
     pop_stats = get_pop_stats(ordered_df, stat)
     gene_a_anchor_z = combine_statistic(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats, stat)
     gene_b_anchor_z = combine_statistic(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats, stat)
@@ -574,6 +620,7 @@ def calc_dlfc(df, base_lfcs):
 
 
 def get_guide_dlfcs(lfc_df, ctl_genes):
+    warnings.warn('delta-LFC functions are not under active development', DeprecationWarning, stacklevel=2)
     """Calculate delta-LFC's at the guide level
 
     Model the LFC of each combination as the sum of each guide when paired with controls. The difference from this
@@ -609,6 +656,7 @@ def get_guide_dlfcs(lfc_df, ctl_genes):
 
 
 def get_gene_dlfcs(guide_dlfcs, stat='dlfc'):
+    warnings.warn('delta-LFC functions are not under active development', DeprecationWarning, stacklevel=2)
     """Combine dLFCs at the gene level
 
     Parameters
@@ -623,7 +671,7 @@ def get_gene_dlfcs(guide_dlfcs, stat='dlfc'):
     DataFrame
         Gene level z_scores
     """
-    ordered_df = order_genes(guide_dlfcs)
+    ordered_df = order_cols(guide_dlfcs, [2, 3], 'gene')
     pop_stats = get_pop_stats(ordered_df, stat)
     combined_z = combine_statistic(ordered_df, pop_stats, stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')

@@ -17,8 +17,9 @@ def test_command_line_interface():
     """Test the CLI."""
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli.main, ["https://raw.githubusercontent.com/PeterDeWeirdt/bigpapi/master/data/processed/bigpapi_lfcs.csv",
-                                          "test", "--control", "CD81", "--control", "HPRT intron"])
+        result = runner.invoke(cli.main, [
+            "https://raw.githubusercontent.com/PeterDeWeirdt/bigpapi/master/data/processed/bigpapi_lfcs.csv",
+            "test", "--control", "CD81", "--control", "HPRT intron"])
         assert result.exit_code == 0
         output_gene_file = pd.read_csv('test_gnt_residual_gene_scores.csv')
         assert ((output_gene_file.sort_values('z_score_residual_z')
@@ -87,10 +88,39 @@ def test_get_guide_residuals(bigpapi_lfcs):
              .values) == [['MAPK3', 'MAPK1']]).all()
 
 
+def test_order_guides():
+    guides = pd.DataFrame({'guide1': ['a', 'a', 'a', 'b'], 'guide2': ['a', 'a', 'b', 'a'],
+                          'anchor_gene': [1, 2, 3, 4], 'target_gene': [1, 2, 3, 4]})
+    ordered_genes = score.order_cols(guides, [0, 1], 'guide')
+    expected_order = guides.copy()
+    expected_order['guide_a'] = ['a', 'a', 'a', 'a']
+    expected_order['guide_b'] = ['a', 'a', 'b', 'b']
+    pd.testing.assert_frame_equal(ordered_genes, expected_order)
+
+
+def test_guide_deduplication(bigpapi_lfcs):
+    rev_bigpapi_lfcs = (bigpapi_lfcs.rename({'U6 Sequence': 'H1 Sequence',
+                                             'H1 Sequence': 'U6 Sequence',
+                                             'U6 gene': 'H1 gene',
+                                             'H1 gene': 'U6 gene'}, axis=1))
+    lfc_df = pd.concat([bigpapi_lfcs, rev_bigpapi_lfcs], axis=0)
+    melted_lfc_df = gnt.score.melt_df(lfc_df)
+    reordered_guides = gnt.score.order_cols_with_meta(melted_lfc_df, [0, 1], [2, 3], 'guide', 'gene')
+    dedup_guide_lfcs = gnt.score.aggregate_guide_lfcs(reordered_guides)
+    assert dedup_guide_lfcs.shape[0] == bigpapi_lfcs.shape[0]*6
+    possible_guide_gene_pairs = set((bigpapi_lfcs['U6 Sequence'] + bigpapi_lfcs['U6 gene']).to_list() +
+                                    (bigpapi_lfcs['H1 Sequence'] + bigpapi_lfcs['H1 gene']).to_list())
+    observed_guide_gene_pairs = set((dedup_guide_lfcs['guide_a'] +
+                                     dedup_guide_lfcs['guide_a_gene']).to_list() +
+                                    (dedup_guide_lfcs['guide_b'] +
+                                     dedup_guide_lfcs['guide_b_gene']).to_list())
+    assert possible_guide_gene_pairs == observed_guide_gene_pairs
+
+
 def test_order_genes():
     genes = pd.DataFrame({'guide1': [1, 2, 3], 'guide2': [1, 2, 3],
                           'anchor_gene': ['A', 'B', 'B'], 'target_gene': ['B', 'B', 'A']})
-    ordered_genes = score.order_genes(genes)
+    ordered_genes = score.order_cols(genes, [2, 3], 'gene')
     expected_order = genes.copy()
     expected_order['gene_a'] = ['A', 'B', 'A']
     expected_order['gene_b'] = ['B', 'B', 'B']
@@ -142,8 +172,10 @@ def test_get_base_lfc_from_resid(bigpapi_lfcs):
 
 def test_warn_controls(bigpapi_lfcs):
     ctl_genes = ['CD81', 'HPRT intron']
-    bcl2l1_no_control = bigpapi_lfcs[~(((bigpapi_lfcs.iloc[:, 2] == 'BCL2L1') & bigpapi_lfcs.iloc[:, 3].isin(ctl_genes)) |
-                                       ((bigpapi_lfcs.iloc[:, 3] == 'BCL2L1') & bigpapi_lfcs.iloc[:, 2].isin(ctl_genes)))]
+    bcl2l1_no_control = bigpapi_lfcs[~(((bigpapi_lfcs.iloc[:, 2] == 'BCL2L1') &
+                                        bigpapi_lfcs.iloc[:, 3].isin(ctl_genes)) |
+                                       ((bigpapi_lfcs.iloc[:, 3] == 'BCL2L1') &
+                                        bigpapi_lfcs.iloc[:, 2].isin(ctl_genes)))]
     anchor_df = gnt.score.build_anchor_df(bcl2l1_no_control)
     melted_anchor_df = gnt.score.melt_df(anchor_df, None)
     guide_base_score = gnt.score.get_base_score(melted_anchor_df, ctl_genes)
