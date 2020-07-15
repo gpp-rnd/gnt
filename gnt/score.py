@@ -145,6 +145,7 @@ def build_anchor_df(df):
                   .rename({df_columns[1]: 'anchor_guide', df_columns[0]: 'target_guide',
                            df_columns[3]: 'anchor_gene', df_columns[2]: 'target_gene'}, axis=1))
     anchor_df = (pd.concat([forward_df, reverse_df])
+                 .drop_duplicates()  # in case where guide1==guide2
                  .reset_index(drop=True))
     return anchor_df
 
