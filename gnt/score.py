@@ -622,7 +622,6 @@ def calc_dlfc(df, base_lfcs):
 
 
 def get_guide_dlfcs(lfc_df, ctl_genes):
-    warnings.warn('delta-LFC functions are not under active development', DeprecationWarning, stacklevel=2)
     """Calculate delta-LFC's at the guide level
 
     Model the LFC of each combination as the sum of each guide when paired with controls. The difference from this
@@ -648,17 +647,24 @@ def get_guide_dlfcs(lfc_df, ctl_genes):
     """
     check_guide_input(lfc_df)
     #  get base lfcs using anchor framework
-    anchor_df = build_anchor_df(lfc_df)
-    melted_anchor_df = melt_df(anchor_df)
-    base_lfcs = get_base_score(melted_anchor_df, ctl_genes)
-    #  calculate delta-log-fold changes without generating an anchor df
+    melted_lfc_df = melt_df(lfc_df)
+    reordered_guides = order_cols_with_meta(melted_lfc_df, [0, 1], [2, 3], 'guide', 'gene')
+    dedup_guide_lfcs = aggregate_guide_lfcs(reordered_guides)
+    melted_anchor_df = build_anchor_df(dedup_guide_lfcs)
+    guide_base_score = get_base_score(melted_anchor_df, ctl_genes)
+    no_control_guides = get_no_control_guides(melted_anchor_df, guide_base_score)
+    #  calculate delta-log-fold changes
+    warn_no_control_guides(melted_anchor_df, no_control_guides)
     melted_df = melt_df(lfc_df)
-    guide_dlfc = calc_dlfc(melted_df, base_lfcs)
+    guide_dlfc = calc_dlfc(melted_df, guide_base_score)
+    #check_guide_input(lfc_df)
+    #anchor_df = build_anchor_df(lfc_df)
+    #melted_anchor_df = melt_df(anchor_df)
+    #base_lfcs = get_base_score(melted_anchor_df, ctl_genes)
     return guide_dlfc
 
 
-def get_gene_dlfcs(guide_dlfcs, stat='dlfc'):
-    warnings.warn('delta-LFC functions are not under active development', DeprecationWarning, stacklevel=2)
+def get_gene_dlfcs(guide_dlfcs, stat='dlfc_z'):
     """Combine dLFCs at the gene level
 
     Parameters
