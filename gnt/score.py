@@ -350,7 +350,8 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
         train_df = df
     train_x = sm.add_constant(train_df[x_col])
     model_fit = sm.OLS(train_df[y_col], train_x).fit()
-    model_info = {'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue}
+    model_info = {'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue, 'const': model_fit.params.const,
+                  'beta': model_fit.params.lfc_target}
     test_df = df.copy()
     predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
     test_df['residual'] = test_df[y_col] - predictions
