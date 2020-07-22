@@ -38,3 +38,9 @@ History
 ------------------
 
 * Deduplicate repeat guide pairs in anchor df
+
+0.2.4 (2020-07-22)
+------------------
+
+* Add model coefficients to guide residual ouput
+* Update delta-LFC functions
