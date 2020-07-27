@@ -44,3 +44,8 @@ History
 
 * Add model coefficients to guide residual ouput
 * Update delta-LFC functions
+
+0.2.5 (2020-07-27)
+------------------
+
+* Add base LFC to dLFC output
