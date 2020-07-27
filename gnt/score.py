@@ -80,6 +80,7 @@ def order_cols(df, cols, name):
 
 
 def order_cols_with_meta(df, cols, meta_cols, col_name, meta_name):
+    #  TODO - merging might be an issue with this function
     """Reorder values in columns to be in alphabetical order, keeping track of columns with
     meta-information
 
@@ -657,11 +658,32 @@ def get_guide_dlfcs(lfc_df, ctl_genes):
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     melted_df = melt_df(lfc_df)
     guide_dlfc = calc_dlfc(melted_df, guide_base_score)
-    #check_guide_input(lfc_df)
-    #anchor_df = build_anchor_df(lfc_df)
-    #melted_anchor_df = melt_df(anchor_df)
-    #base_lfcs = get_base_score(melted_anchor_df, ctl_genes)
     return guide_dlfc
+
+
+def get_base_lfc_from_dlfc(dlfc_df):
+    """Calculate gene level base lfcs from the guide-level dLFC dataframe
+
+    Parameters
+    ----------
+    dlfc_df: DataFrame
+        DataFrame of delta log-fold changes
+
+    Returns
+    -------
+    DataFrame
+        With columns gene, condition, base_lfc
+    """
+    gene1 = dlfc_df.columns[2]
+    gene2 = dlfc_df.columns[3]
+    guide1_base = 'lfc_' + dlfc_df.columns[0] + '_base'
+    guide2_base = 'lfc_' + dlfc_df.columns[1] + '_base'
+    base_lfcs = (pd.concat([dlfc_df.rename({gene1: 'gene', guide1_base: 'base_lfc'}, axis=1),
+                            dlfc_df.rename({gene2: 'gene', guide2_base: 'base_lfc'}, axis=1)])
+                 .groupby(['condition', 'gene'])
+                 .agg({'base_lfc': 'mean'})
+                 .reset_index())
+    return base_lfcs
 
 
 def get_gene_dlfcs(guide_dlfcs, stat='dlfc_z'):
@@ -683,5 +705,12 @@ def get_gene_dlfcs(guide_dlfcs, stat='dlfc_z'):
     pop_stats = get_pop_stats(ordered_df, stat)
     combined_z = combine_statistic(ordered_df, pop_stats, stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
-    gene_results = (avg_lfc.merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b']))
+    base_lfcs = get_base_lfc_from_dlfc(guide_dlfcs)
+    gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],
+                                  right_on=['condition', 'gene'])
+                    .drop('gene', axis=1)
+                    .merge(base_lfcs, how='inner', left_on=['condition', 'gene_b'],
+                           right_on=['condition', 'gene'], suffixes=['_a', '_b'])
+                    .drop('gene', axis=1)
+                    .merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b']))
     return gene_results
