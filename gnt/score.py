@@ -114,7 +114,7 @@ def order_cols_with_meta(df, cols, meta_cols, col_name, meta_name):
                                                                   else row[col1]), axis=1)
     four_col_df[col_name + '_b_' + meta_name] = four_col_df.apply(lambda row: (row[meta_col2] if row[col1] <= row[col2]
                                                                   else row[meta_col1]), axis=1)
-    ordered_df = df.merge(four_col_df, how='inner', on=[col1, col2])
+    ordered_df = df.merge(four_col_df, how='inner', on=[col1, meta_col1, col2, meta_col2])
     return ordered_df
 
 
