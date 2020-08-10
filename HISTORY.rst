@@ -49,3 +49,9 @@ History
 ------------------
 
 * Add base LFC to dLFC output
+
+0.3.0 (2020-08-10)
+------------------
+
+* Added spline, fixed slope and quadratic models for calculating guide residuals
+* Combined z-scores by square root of sample size rather than re-calculating z-scores
