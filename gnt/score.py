@@ -80,7 +80,6 @@ def order_cols(df, cols, name):
 
 
 def order_cols_with_meta(df, cols, meta_cols, col_name, meta_name):
-    #  TODO - merging might be an issue with this function
     """Reorder values in columns to be in alphabetical order, keeping track of columns with
     meta-information
 
@@ -320,7 +319,7 @@ def filter_anchor_base_scores(df, min_pairs):
     return df
 
 
-def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target', y_col='lfc'):
+def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
     """Fit linear model for a single anchor guide paired with all target guides in a condition
 
     Parameters
@@ -329,10 +328,6 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
         LFCs for a single anchor anchor guide
     fit_genes: list
         Genes used to fit the linear model
-    scale: bool
-        Whether to scale residuals by the confidence interval of the best fit line
-    scale_alpha: float, optional
-        Specifies width of confidence interval
     x_col: str, optional
         X column to fit model
     y_col: str, optional
@@ -357,19 +352,10 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
     predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
     test_df['residual'] = test_df[y_col] - predictions
     test_df['residual_z'] = (test_df['residual'] - test_df['residual'].mean())/test_df['residual'].std()
-    if scale:
-        prediction_results = model_fit.get_prediction(sm.add_constant(test_df[x_col]))
-        summary_frame = prediction_results.summary_frame(alpha=scale_alpha)  # summary frame has confidence interval
-        # for predictions
-        test_df[['mean_ci_lower', 'mean_ci_upper']] = summary_frame[['mean_ci_lower', 'mean_ci_upper']]
-        test_df['ci'] = test_df['mean_ci_upper'] - test_df['mean_ci_lower']
-        test_df['scaled_residual'] = test_df['residual']/test_df['ci']
-        test_df['scaled_residual_z'] = (test_df['scaled_residual'] -
-                                        test_df['scaled_residual'].mean()) / test_df['scaled_residual'].std()
     return test_df, model_info
 
 
-def fit_models(df, fit_genes, scale_resids):
+def fit_models(df, fit_genes):
     """Loop through anchor guides and fit a linear model
 
     Parameters
@@ -378,8 +364,6 @@ def fit_models(df, fit_genes, scale_resids):
         LFCs for all anchor guides
     fit_genes: list
         Genes used to fit the linear model
-    scale_resids: bool
-        Whether to scale residuals by the confidence interval of the best fit line
 
     Returns
     -------
@@ -391,7 +375,7 @@ def fit_models(df, fit_genes, scale_resids):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        residuals, model_info = fit_anchor_model(group_df, fit_genes, scale_resids)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
@@ -403,7 +387,7 @@ def fit_models(df, fit_genes, scale_resids):
     return residual_df, model_info_df
 
 
-def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
+def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
                         min_pairs=5):
     """Calculate guide-level residuals
 
@@ -421,9 +405,6 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
     fit_genes: list, optional
         Genes used to train each linear model. If None, uses all genes to fit. This can be helpful if we expect
         a large fraction of target_genes to be interactors
-    scale: bool, optional
-        Whether to scale residuals by the confidence interval at a fit point (experimental). The output will then
-        include a column "sclaed_residual" and "scaled_residual_z"
     min_pairs: int, optional
         Minimum number of pairs a guide must be in
 
@@ -444,7 +425,7 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
     filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
-    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, scale)
+    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes)
     return guide_residuals, model_info_df
 
 
