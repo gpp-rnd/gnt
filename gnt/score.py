@@ -269,7 +269,7 @@ def check_min_guide_pairs(df, min_pairs):
     pair_count = (df[['anchor_guide', 'target_guide']]
                   .drop_duplicates()
                   .groupby('anchor_guide')
-                  .apply(lambda df: df.shape[0])
+                  .apply(lambda d: d.shape[0])
                   .reset_index(name='n'))
     guides_no_pairs = pair_count.anchor_guide[~(pair_count.n >= min_pairs)].to_list()
     return guides_no_pairs
@@ -319,7 +319,34 @@ def filter_anchor_base_scores(df, min_pairs):
     return df
 
 
-def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
+def model_ols(train_x, train_y, test_x):
+    """Predict guide phenotype using ordinary least squares
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about OLS model
+    """
+    train_x = sm.add_constant(train_x)
+    model_fit = sm.OLS(train_y, train_x).fit()
+    model_info = {'model': 'OLS', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
+                  'const': model_fit.params.const, 'beta': model_fit.params.lfc_target}
+    predictions = model_fit.predict(sm.add_constant(test_x))
+    return predictions, model_info
+
+
+def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     """Fit linear model for a single anchor guide paired with all target guides in a condition
 
     Parameters
@@ -328,6 +355,8 @@ def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
         LFCs for a single anchor anchor guide
     fit_genes: list
         Genes used to fit the linear model
+    model: str
+        Name of model used to fit x and y data
     x_col: str, optional
         X column to fit model
     y_col: str, optional
@@ -344,18 +373,19 @@ def fit_anchor_model(df, fit_genes, x_col='lfc_target', y_col='lfc'):
         train_df = df.loc[df.target_gene.isin(fit_genes), :].copy()
     else:
         train_df = df
-    train_x = sm.add_constant(train_df[x_col])
-    model_fit = sm.OLS(train_df[y_col], train_x).fit()
-    model_info = {'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue, 'const': model_fit.params.const,
-                  'beta': model_fit.params.lfc_target}
-    test_df = df.copy()
-    predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
-    test_df['residual'] = test_df[y_col] - predictions
-    test_df['residual_z'] = (test_df['residual'] - test_df['residual'].mean())/test_df['residual'].std()
-    return test_df, model_info
+    train_x = train_df[x_col].copy()
+    train_y = train_df[y_col].copy()
+    test_x = df[x_col].copy()
+    test_y = df[y_col].copy()
+    if model == 'OLS':
+        predictions, model_info = model_ols(train_x, train_y, test_x)
+    out_df = df.copy()
+    out_df['residual'] = test_y - predictions
+    out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
+    return out_df, model_info
 
 
-def fit_models(df, fit_genes):
+def fit_models(df, fit_genes, model):
     """Loop through anchor guides and fit a linear model
 
     Parameters
@@ -364,6 +394,8 @@ def fit_models(df, fit_genes):
         LFCs for all anchor guides
     fit_genes: list
         Genes used to fit the linear model
+    model: str
+        Name of model used to fit x and y data
 
     Returns
     -------
@@ -375,7 +407,7 @@ def fit_models(df, fit_genes):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        residuals, model_info = fit_anchor_model(group_df, fit_genes)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes, model)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
@@ -388,7 +420,7 @@ def fit_models(df, fit_genes):
 
 
 def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
-                        min_pairs=5):
+                        min_pairs=5, model='OLS'):
     """Calculate guide-level residuals
 
     Parameters
@@ -407,6 +439,8 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
         a large fraction of target_genes to be interactors
     min_pairs: int, optional
         Minimum number of pairs a guide must be in
+    model: str, optional
+        Name of model to fit to data
 
     Returns
     -------
@@ -425,7 +459,7 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
     filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
-    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes)
+    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, model)
     return guide_residuals, model_info_df
 
 
@@ -543,8 +577,6 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
         Guide level residuals
     stat: str, optional
         Statistic to combine at the gene level
-    min_pairs: int, optional
-        Minimum number of gene pairs for a gene to be considered
 
     Returns
     -------

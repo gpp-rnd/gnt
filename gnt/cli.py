@@ -26,9 +26,6 @@ def main(input_file, in_delim, score, output_base_name, control, fit_genes):
     if score == 'residual':
         guide_scores, _ = gnt.get_guide_residuals(lfcs, control, fit_genes)
         gene_scores = gnt.get_gene_residuals(guide_scores, 'residual_z')
-    elif score == 'scaled_residual':
-        guide_scores, _ = gnt.get_guide_residuals(lfcs, control, fit_genes, scale=True)
-        gene_scores = gnt.get_gene_residuals(guide_scores, 'scaled_residual_z')
     elif score == 'dlfc':
         guide_scores = gnt.get_guide_dlfcs(lfcs, control)
         gene_scores = gnt.get_gene_dlfcs(guide_scores, 'dlfc')

@@ -63,7 +63,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
     train_df = anchor_base_scores.loc[(anchor_base_scores.anchor_guide == 'GCTGTATCCTTTCTGGGAAAG') &
                                       (anchor_base_scores.condition == 'Day 21_Meljuso'), :]  # BCL2L1 guide
-    residuals, model_info = score.fit_anchor_model(train_df, None)
+    residuals, model_info = score.fit_anchor_model(train_df, None, 'OLS')
     assert model_info['R2'] > 0.5
     gene_residuals = (residuals.groupby('target_gene')
                       .agg({'residual_z': 'mean'})
@@ -71,7 +71,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
                       .reset_index())
     assert gene_residuals.loc[0, 'target_gene'] == 'MCL1'
     assert gene_residuals['target_gene'].iloc[-1] == 'BCL2L1'
-    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'])
+    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'OLS')
     assert model_info['f_pvalue'] < ctl_model_info['f_pvalue']
 
 
