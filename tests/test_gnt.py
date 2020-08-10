@@ -23,7 +23,7 @@ def test_command_line_interface():
             "test", "--control", "CD81", "--control", "HPRT intron"])
         assert result.exit_code == 0
         output_gene_file = pd.read_csv('test_gnt_residual_gene_scores.csv')
-        assert ((output_gene_file.sort_values('z_score_residual_z')
+        assert ((output_gene_file.sort_values('pair_z_score')
                  .head(1)
                  [['gene_a', 'gene_b']]
                  .values) == [['MAPK1', 'MAPK3']]).all()
@@ -129,12 +129,12 @@ def test_order_genes():
 def test_get_gene_residuals(bigpapi_lfcs):
     guide_residuals, model_info_df = gnt.get_guide_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'])
     gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
-    assert ((gene_results.sort_values('z_score_residual_z')
+    assert ((gene_results.sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
     gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
-    assert ((gene_results.sort_values('z_score_residual_z')
+    assert ((gene_results.sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
@@ -154,10 +154,11 @@ def test_get_guide_dlfc(bigpapi_lfcs):
 def test_get_gene_dlfc(bigpapi_lfcs):
     guide_dlfcs = gnt.get_guide_dlfcs(bigpapi_lfcs, ['HPRT intron', 'CD81'])
     gene_dlfc = gnt.get_gene_dlfcs(guide_dlfcs, 'dlfc')
-    assert ((gene_dlfc.sort_values('z_score_dlfc')
+    assert ((gene_dlfc[gene_dlfc.guide_pairs < 20]
+             .sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
-             .values) == [['BCL2L1', 'MCL1']]).all()
+             .values) == [['MAPK1', 'MAPK3']]).all()
 
 
 def test_get_base_lfc_from_resid(bigpapi_lfcs):
@@ -232,4 +233,3 @@ def test_model_spline_glm():
     linear_residual = (linear_predictions - train_y).abs().mean()
     assert spline_residual < linear_residual
     assert spline_residual < quad_residual
-

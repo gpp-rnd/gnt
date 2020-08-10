@@ -585,21 +585,15 @@ def get_pop_stats(df, stat):
     return pop_stats
 
 
-def combine_statistic(df, pop_stats, stat):
-    """Combine a statistic for a gene pair
+def combine_z_scores(df, stat):
+    """Combine z-score for a gene pair
 
-    .. math::
-        (x - \mu)/(\sigma / \sqrt{n})
-
-    Where :math:`x, \mu, \sigma` are the sample mean, population mean, and population standard deviation of
-    residuals, and :math:`n` is the number of guide pairs.
+    Sum z-scores and divide by the square root of the number of observations
 
     Parameters
     ----------
     df: DataFrame
         guide level statistic
-    pop_stats: DataFrame
-        population stats
     stat: str
         statistic to combine
 
@@ -611,18 +605,15 @@ def combine_statistic(df, pop_stats, stat):
     guide1 = df.columns[0]
     guide2 = df.columns[1]
     combo_stats = (df.groupby(['condition', 'gene_a', 'gene_b'])
-                   .agg(mean_stat=(stat, 'mean'))
-                   .reset_index()
-                   .merge(pop_stats, how='inner', on='condition',
-                          suffixes=['', '_pop']))
+                   .agg(sum_stat=(stat, 'sum'))
+                   .reset_index())
     guide_pair_df = (df.groupby(['condition', 'gene_a', 'gene_b'])
                      .apply(lambda d: len({frozenset(x) for x in zip(d[guide1], d[guide2])}))  # use sets to count
                      # # unique guide pairs
                      .reset_index(name='guide_pairs'))
     combo_stats = combo_stats.merge(guide_pair_df, how='inner', on=['condition', 'gene_a', 'gene_b'])
-    combo_stats['z_score_' + stat] = ((combo_stats['mean_stat'] - combo_stats['mean_stat_pop']) /
-                                      (combo_stats['std_stat'] / np.sqrt(combo_stats['guide_pairs'])))
-    return combo_stats[['condition', 'gene_a', 'gene_b', 'guide_pairs', 'z_score_' + stat]]
+    combo_stats['pair_z_score'] = (combo_stats['sum_stat'] / np.sqrt(combo_stats['guide_pairs']))
+    return combo_stats[['condition', 'gene_a', 'gene_b', 'guide_pairs', 'pair_z_score']]
 
 
 def get_avg_score(df, score):
@@ -684,10 +675,8 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
         Gene level z_scores
     """
     ordered_df = order_cols(guide_residuals, [2, 3], 'gene')
-    pop_stats = get_pop_stats(ordered_df, stat)
-    gene_a_anchor_z = combine_statistic(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats, stat)
-    gene_b_anchor_z = combine_statistic(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats, stat)
-    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    gene_a_anchor_z = combine_z_scores(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], stat)
+    gene_b_anchor_z = combine_z_scores(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
     base_lfcs = get_base_lfc_from_resid(guide_residuals)
     gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],
@@ -696,11 +685,13 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
                     .merge(base_lfcs, how='inner', left_on=['condition', 'gene_b'],
                            right_on=['condition', 'gene'], suffixes=['_a', '_b'])
                     .drop('gene', axis=1)
-                    .merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_a_anchor'])
+                           on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_b_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_b_anchor']))
+                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['_gene_a_anchor',
+                                                                                          '_gene_b_anchor']))
+    gene_results['pair_z_score'] = (gene_results[['pair_z_score_gene_a_anchor', 'pair_z_score_gene_b_anchor']]
+                                    .sum(axis=1) / np.sqrt(2))
     return gene_results
 
 
@@ -815,8 +806,7 @@ def get_gene_dlfcs(guide_dlfcs, stat='dlfc_z'):
         Gene level z_scores
     """
     ordered_df = order_cols(guide_dlfcs, [2, 3], 'gene')
-    pop_stats = get_pop_stats(ordered_df, stat)
-    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    combined_z = combine_z_scores(ordered_df, stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
     base_lfcs = get_base_lfc_from_dlfc(guide_dlfcs)
     gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],

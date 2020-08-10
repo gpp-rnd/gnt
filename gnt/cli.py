@@ -9,7 +9,7 @@ import gnt
                 required=True)
 @click.argument('output_base_name')
 @click.option('--control', help='Negative control genes to calculate base LFCs', required=True, multiple=True)
-@click.option('--score', default='residual', type=click.Choice(['residual', 'scaled_residual', 'dlfc']),
+@click.option('--score', default='residual', type=click.Choice(['residual', 'dlfc']),
               help='Method for calculating combinatorial interactors')
 @click.option('--in_delim', default=',', help='Delimiter to read files.')
 @click.option('--fit_genes', default=None, help='Genes used to fit linear models. Defaults to all genes.')
