@@ -319,8 +319,68 @@ def filter_anchor_base_scores(df, min_pairs):
     return df
 
 
-def model_ols(train_x, train_y, test_x):
-    """Predict guide phenotype using ordinary least squares
+def model_fixed_slope(train_x, train_y, test_x, slope=1):
+    """Predict guide phenotype using fixed slope
+
+    From: https://stackoverflow.com/questions/33292969/linear-regression-with-specified-slope
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+    slope: int
+        Slope to fit model
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about model
+    """
+    intercept = np.mean(train_y - train_x*slope)
+    model_info = {'model': 'fixed_slope', 'const': intercept}
+    predictions = test_x*slope + intercept
+    return predictions, model_info
+
+
+def model_spline(train_x, train_y, test_x, df=4):
+    """Predict guide phenotype using a natural cubic spline
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about GLM model
+    """
+    train_x = train_x.rename('x', axis=1)
+    train_x = sm.add_constant(train_x)
+    train_df = train_x.copy()
+    train_df['y'] = train_y
+    model_fit = sm.formula.ols('y ~ cr(x, df=' + str(df) + ') + const', data=train_df).fit()
+    model_info = {'model': 'spline', 'const': model_fit.params.const}
+    test_x = test_x.rename('x')
+    test_x = sm.add_constant(test_x)
+    predictions = model_fit.predict(test_x)
+    return predictions, model_info
+
+
+def model_linear(train_x, train_y, test_x):
+    """Predict guide phenotype using a linear model and ordinary least squares
 
     Parameters
     ----------
@@ -340,9 +400,41 @@ def model_ols(train_x, train_y, test_x):
     """
     train_x = sm.add_constant(train_x)
     model_fit = sm.OLS(train_y, train_x).fit()
-    model_info = {'model': 'OLS', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
-                  'const': model_fit.params.const, 'beta': model_fit.params.lfc_target}
+    model_info = {'model': 'linear', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
+                  'const': model_fit.params.const, 'beta': model_fit.params.values[1]}
     predictions = model_fit.predict(sm.add_constant(test_x))
+    return predictions, model_info
+
+
+def model_quadratic(train_x, train_y, test_x):
+    """Predict guide phenotype using a linear model and ordinary least squares
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about OLS model
+    """
+    train_x = train_x.rename('x', axis=1)
+    train_x = sm.add_constant(train_x)
+    train_df = train_x.copy()
+    train_df['y'] = train_y
+    model_fit = sm.formula.ols('y ~ np.power(x, 2) + x + const', data=train_df).fit()
+    model_info = {'model': 'quadratic', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
+                  'const': model_fit.params.const}
+    test_x = test_x.rename('x')
+    test_x = sm.add_constant(test_x)
+    predictions = model_fit.predict(test_x)
     return predictions, model_info
 
 
@@ -377,8 +469,16 @@ def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     train_y = train_df[y_col].copy()
     test_x = df[x_col].copy()
     test_y = df[y_col].copy()
-    if model == 'OLS':
-        predictions, model_info = model_ols(train_x, train_y, test_x)
+    if model == 'linear':
+        predictions, model_info = model_linear(train_x, train_y, test_x)
+    elif model == 'fixed slope':
+        predictions, model_info = model_fixed_slope(train_x, train_y, test_x)
+    elif model == 'spline':
+        predictions, model_info = model_spline(train_x, train_y, test_x)
+    elif model == 'quadratic':
+        predictions, model_info = model_quadratic(train_x, train_y, test_x)
+    else:
+        raise ValueError('Model ' + model + ' not implemented')
     out_df = df.copy()
     out_df['residual'] = test_y - predictions
     out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
@@ -420,7 +520,7 @@ def fit_models(df, fit_genes, model):
 
 
 def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
-                        min_pairs=5, model='OLS'):
+                        min_pairs=5, model='linear'):
     """Calculate guide-level residuals
 
     Parameters

@@ -11,6 +11,7 @@ from gnt import score
 import gnt
 import pandas as pd
 import warnings
+import numpy as np
 
 
 def test_command_line_interface():
@@ -63,7 +64,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
     train_df = anchor_base_scores.loc[(anchor_base_scores.anchor_guide == 'GCTGTATCCTTTCTGGGAAAG') &
                                       (anchor_base_scores.condition == 'Day 21_Meljuso'), :]  # BCL2L1 guide
-    residuals, model_info = score.fit_anchor_model(train_df, None, 'OLS')
+    residuals, model_info = score.fit_anchor_model(train_df, None, 'linear')
     assert model_info['R2'] > 0.5
     gene_residuals = (residuals.groupby('target_gene')
                       .agg({'residual_z': 'mean'})
@@ -71,7 +72,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
                       .reset_index())
     assert gene_residuals.loc[0, 'target_gene'] == 'MCL1'
     assert gene_residuals['target_gene'].iloc[-1] == 'BCL2L1'
-    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'OLS')
+    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'linear')
     assert model_info['f_pvalue'] < ctl_model_info['f_pvalue']
 
 
@@ -203,3 +204,32 @@ def test_filter_anchor_base_scores(bigpapi_lfcs):
         assert '6' in str(w[0].message)
         assert filtered_anchor_base_scores.shape[0] < anchor_base_scores.shape[0]
         assert filtered_anchor_base_scores.shape[0] > 0
+
+
+def test_model_fixed_slope():
+    train_x = pd.Series([1, 2, 3])
+    train_y = pd.Series([2, 3, 4])
+    predictions, model_info = score.model_fixed_slope(train_x, train_y, train_x, slope=1)
+    assert (predictions == train_y).all()
+    assert model_info['const'] == 1
+
+
+def test_model_quadratic_ols():
+    train_x = pd.Series([-2, -1, 0, 1, 2])
+    train_y = pd.Series([4, 1, 0, 1, 4])
+    predictions, model_info = score.model_quadratic(train_x, train_y, train_x)
+    assert np.allclose(predictions, train_y)
+
+
+def test_model_spline_glm():
+    train_x = pd.Series([-2, -1, 0, 1, 2])
+    train_y = pd.Series([2, 2, 1, 0.5, 1])
+    spline_predictions, _ = score.model_spline(train_x, train_y, train_x)
+    spline_residual = (spline_predictions - train_y).abs().mean()
+    quad_predictions, _ = score.model_quadratic(train_x, train_y, train_x)
+    quad_residual = (quad_predictions - train_y).abs().mean()
+    linear_predictions, _ = score.model_linear(train_x, train_y, train_x)
+    linear_residual = (linear_predictions - train_y).abs().mean()
+    assert spline_residual < linear_residual
+    assert spline_residual < quad_residual
+
