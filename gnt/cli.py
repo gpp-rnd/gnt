@@ -9,7 +9,7 @@ import gnt
                 required=True)
 @click.argument('output_base_name')
 @click.option('--control', help='Negative control genes to calculate base LFCs', required=True, multiple=True)
-@click.option('--score', default='residual', type=click.Choice(['residual', 'scaled_residual', 'dlfc']),
+@click.option('--score', default='residual', type=click.Choice(['residual', 'dlfc']),
               help='Method for calculating combinatorial interactors')
 @click.option('--in_delim', default=',', help='Delimiter to read files.')
 @click.option('--fit_genes', default=None, help='Genes used to fit linear models. Defaults to all genes.')
@@ -26,9 +26,6 @@ def main(input_file, in_delim, score, output_base_name, control, fit_genes):
     if score == 'residual':
         guide_scores, _ = gnt.get_guide_residuals(lfcs, control, fit_genes)
         gene_scores = gnt.get_gene_residuals(guide_scores, 'residual_z')
-    elif score == 'scaled_residual':
-        guide_scores, _ = gnt.get_guide_residuals(lfcs, control, fit_genes, scale=True)
-        gene_scores = gnt.get_gene_residuals(guide_scores, 'scaled_residual_z')
     elif score == 'dlfc':
         guide_scores = gnt.get_guide_dlfcs(lfcs, control)
         gene_scores = gnt.get_gene_dlfcs(guide_scores, 'dlfc')

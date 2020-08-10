@@ -11,6 +11,7 @@ from gnt import score
 import gnt
 import pandas as pd
 import warnings
+import numpy as np
 
 
 def test_command_line_interface():
@@ -22,7 +23,7 @@ def test_command_line_interface():
             "test", "--control", "CD81", "--control", "HPRT intron"])
         assert result.exit_code == 0
         output_gene_file = pd.read_csv('test_gnt_residual_gene_scores.csv')
-        assert ((output_gene_file.sort_values('z_score_residual_z')
+        assert ((output_gene_file.sort_values('pair_z_score')
                  .head(1)
                  [['gene_a', 'gene_b']]
                  .values) == [['MAPK1', 'MAPK3']]).all()
@@ -63,7 +64,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
     train_df = anchor_base_scores.loc[(anchor_base_scores.anchor_guide == 'GCTGTATCCTTTCTGGGAAAG') &
                                       (anchor_base_scores.condition == 'Day 21_Meljuso'), :]  # BCL2L1 guide
-    residuals, model_info = score.fit_anchor_model(train_df, None, False)
+    residuals, model_info = score.fit_anchor_model(train_df, None, 'linear')
     assert model_info['R2'] > 0.5
     gene_residuals = (residuals.groupby('target_gene')
                       .agg({'residual_z': 'mean'})
@@ -71,15 +72,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
                       .reset_index())
     assert gene_residuals.loc[0, 'target_gene'] == 'MCL1'
     assert gene_residuals['target_gene'].iloc[-1] == 'BCL2L1'
-    # test scale
-    residuals, model_info = score.fit_anchor_model(train_df, None, True)
-    residuals['scaled_pct_rank'] = residuals.scaled_residual_z.abs().rank(pct=True)
-    residuals['unscaled_pct_rank'] = residuals.residual_z.abs().rank(pct=True)
-    eef2_pct_rank = (residuals[residuals.target_gene == 'EEF2']
-                     .agg({'scaled_pct_rank': 'mean',
-                           'unscaled_pct_rank': 'mean'}))
-    assert eef2_pct_rank['scaled_pct_rank'] < eef2_pct_rank['unscaled_pct_rank']
-    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], False)
+    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'linear')
     assert model_info['f_pvalue'] < ctl_model_info['f_pvalue']
 
 
@@ -134,14 +127,14 @@ def test_order_genes():
 
 
 def test_get_gene_residuals(bigpapi_lfcs):
-    guide_residuals, model_info_df = gnt.get_guide_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'], scale=True)
+    guide_residuals, model_info_df = gnt.get_guide_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'])
     gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
-    assert ((gene_results.sort_values('z_score_residual_z')
+    assert ((gene_results.sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
-    scaled_gene_results = gnt.get_gene_residuals(guide_residuals, 'scaled_residual_z')
-    assert ((scaled_gene_results.sort_values('z_score_scaled_residual_z')
+    gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
+    assert ((gene_results.sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
@@ -161,10 +154,11 @@ def test_get_guide_dlfc(bigpapi_lfcs):
 def test_get_gene_dlfc(bigpapi_lfcs):
     guide_dlfcs = gnt.get_guide_dlfcs(bigpapi_lfcs, ['HPRT intron', 'CD81'])
     gene_dlfc = gnt.get_gene_dlfcs(guide_dlfcs, 'dlfc')
-    assert ((gene_dlfc.sort_values('z_score_dlfc')
+    assert ((gene_dlfc[gene_dlfc.guide_pairs < 20]
+             .sort_values('pair_z_score')
              .head(1)
              [['gene_a', 'gene_b']]
-             .values) == [['BCL2L1', 'MCL1']]).all()
+             .values) == [['MAPK1', 'MAPK3']]).all()
 
 
 def test_get_base_lfc_from_resid(bigpapi_lfcs):
@@ -211,3 +205,31 @@ def test_filter_anchor_base_scores(bigpapi_lfcs):
         assert '6' in str(w[0].message)
         assert filtered_anchor_base_scores.shape[0] < anchor_base_scores.shape[0]
         assert filtered_anchor_base_scores.shape[0] > 0
+
+
+def test_model_fixed_slope():
+    train_x = pd.Series([1, 2, 3])
+    train_y = pd.Series([2, 3, 4])
+    predictions, model_info = score.model_fixed_slope(train_x, train_y, train_x, slope=1)
+    assert (predictions == train_y).all()
+    assert model_info['const'] == 1
+
+
+def test_model_quadratic_ols():
+    train_x = pd.Series([-2, -1, 0, 1, 2])
+    train_y = pd.Series([4, 1, 0, 1, 4])
+    predictions, model_info = score.model_quadratic(train_x, train_y, train_x)
+    assert np.allclose(predictions, train_y)
+
+
+def test_model_spline_glm():
+    train_x = pd.Series([-2, -1, 0, 1, 2])
+    train_y = pd.Series([2, 2, 1, 0.5, 1])
+    spline_predictions, _ = score.model_spline(train_x, train_y, train_x)
+    spline_residual = (spline_predictions - train_y).abs().mean()
+    quad_predictions, _ = score.model_quadratic(train_x, train_y, train_x)
+    quad_residual = (quad_predictions - train_y).abs().mean()
+    linear_predictions, _ = score.model_linear(train_x, train_y, train_x)
+    linear_residual = (linear_predictions - train_y).abs().mean()
+    assert spline_residual < linear_residual
+    assert spline_residual < quad_residual

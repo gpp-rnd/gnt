@@ -80,7 +80,6 @@ def order_cols(df, cols, name):
 
 
 def order_cols_with_meta(df, cols, meta_cols, col_name, meta_name):
-    #  TODO - merging might be an issue with this function
     """Reorder values in columns to be in alphabetical order, keeping track of columns with
     meta-information
 
@@ -270,7 +269,7 @@ def check_min_guide_pairs(df, min_pairs):
     pair_count = (df[['anchor_guide', 'target_guide']]
                   .drop_duplicates()
                   .groupby('anchor_guide')
-                  .apply(lambda df: df.shape[0])
+                  .apply(lambda d: d.shape[0])
                   .reset_index(name='n'))
     guides_no_pairs = pair_count.anchor_guide[~(pair_count.n >= min_pairs)].to_list()
     return guides_no_pairs
@@ -320,7 +319,126 @@ def filter_anchor_base_scores(df, min_pairs):
     return df
 
 
-def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target', y_col='lfc'):
+def model_fixed_slope(train_x, train_y, test_x, slope=1):
+    """Predict guide phenotype using fixed slope
+
+    From: https://stackoverflow.com/questions/33292969/linear-regression-with-specified-slope
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+    slope: int
+        Slope to fit model
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about model
+    """
+    intercept = np.mean(train_y - train_x*slope)
+    model_info = {'model': 'fixed_slope', 'const': intercept}
+    predictions = test_x*slope + intercept
+    return predictions, model_info
+
+
+def model_spline(train_x, train_y, test_x, df=4):
+    """Predict guide phenotype using a natural cubic spline
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about GLM model
+    """
+    train_x = train_x.rename('x', axis=1)
+    train_x = sm.add_constant(train_x)
+    train_df = train_x.copy()
+    train_df['y'] = train_y
+    model_fit = sm.formula.ols('y ~ cr(x, df=' + str(df) + ') + const', data=train_df).fit()
+    model_info = {'model': 'spline', 'const': model_fit.params.const}
+    test_x = test_x.rename('x')
+    test_x = sm.add_constant(test_x)
+    predictions = model_fit.predict(test_x)
+    return predictions, model_info
+
+
+def model_linear(train_x, train_y, test_x):
+    """Predict guide phenotype using a linear model and ordinary least squares
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about OLS model
+    """
+    train_x = sm.add_constant(train_x)
+    model_fit = sm.OLS(train_y, train_x).fit()
+    model_info = {'model': 'linear', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
+                  'const': model_fit.params.const, 'beta': model_fit.params.values[1]}
+    predictions = model_fit.predict(sm.add_constant(test_x))
+    return predictions, model_info
+
+
+def model_quadratic(train_x, train_y, test_x):
+    """Predict guide phenotype using a linear model and ordinary least squares
+
+    Parameters
+    ----------
+    train_x: Series
+        Single gene phenotype for training genes
+    train_y: Series
+        Pair phenotype for training genes
+    test_x: Series
+        Single gene phenotype for testing genes
+
+    Returns
+    -------
+    Series
+        Predicted phenotype of pair
+    DataFrame
+        Information about OLS model
+    """
+    train_x = train_x.rename('x', axis=1)
+    train_x = sm.add_constant(train_x)
+    train_df = train_x.copy()
+    train_df['y'] = train_y
+    model_fit = sm.formula.ols('y ~ np.power(x, 2) + x + const', data=train_df).fit()
+    model_info = {'model': 'quadratic', 'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue,
+                  'const': model_fit.params.const}
+    test_x = test_x.rename('x')
+    test_x = sm.add_constant(test_x)
+    predictions = model_fit.predict(test_x)
+    return predictions, model_info
+
+
+def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     """Fit linear model for a single anchor guide paired with all target guides in a condition
 
     Parameters
@@ -329,10 +447,8 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
         LFCs for a single anchor anchor guide
     fit_genes: list
         Genes used to fit the linear model
-    scale: bool
-        Whether to scale residuals by the confidence interval of the best fit line
-    scale_alpha: float, optional
-        Specifies width of confidence interval
+    model: str
+        Name of model used to fit x and y data
     x_col: str, optional
         X column to fit model
     y_col: str, optional
@@ -349,27 +465,27 @@ def fit_anchor_model(df, fit_genes, scale, scale_alpha=0.05, x_col='lfc_target',
         train_df = df.loc[df.target_gene.isin(fit_genes), :].copy()
     else:
         train_df = df
-    train_x = sm.add_constant(train_df[x_col])
-    model_fit = sm.OLS(train_df[y_col], train_x).fit()
-    model_info = {'R2': model_fit.rsquared, 'f_pvalue': model_fit.f_pvalue, 'const': model_fit.params.const,
-                  'beta': model_fit.params.lfc_target}
-    test_df = df.copy()
-    predictions = model_fit.predict(sm.add_constant(test_df[x_col]))
-    test_df['residual'] = test_df[y_col] - predictions
-    test_df['residual_z'] = (test_df['residual'] - test_df['residual'].mean())/test_df['residual'].std()
-    if scale:
-        prediction_results = model_fit.get_prediction(sm.add_constant(test_df[x_col]))
-        summary_frame = prediction_results.summary_frame(alpha=scale_alpha)  # summary frame has confidence interval
-        # for predictions
-        test_df[['mean_ci_lower', 'mean_ci_upper']] = summary_frame[['mean_ci_lower', 'mean_ci_upper']]
-        test_df['ci'] = test_df['mean_ci_upper'] - test_df['mean_ci_lower']
-        test_df['scaled_residual'] = test_df['residual']/test_df['ci']
-        test_df['scaled_residual_z'] = (test_df['scaled_residual'] -
-                                        test_df['scaled_residual'].mean()) / test_df['scaled_residual'].std()
-    return test_df, model_info
+    train_x = train_df[x_col].copy()
+    train_y = train_df[y_col].copy()
+    test_x = df[x_col].copy()
+    test_y = df[y_col].copy()
+    if model == 'linear':
+        predictions, model_info = model_linear(train_x, train_y, test_x)
+    elif model == 'fixed slope':
+        predictions, model_info = model_fixed_slope(train_x, train_y, test_x)
+    elif model == 'spline':
+        predictions, model_info = model_spline(train_x, train_y, test_x)
+    elif model == 'quadratic':
+        predictions, model_info = model_quadratic(train_x, train_y, test_x)
+    else:
+        raise ValueError('Model ' + model + ' not implemented')
+    out_df = df.copy()
+    out_df['residual'] = test_y - predictions
+    out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
+    return out_df, model_info
 
 
-def fit_models(df, fit_genes, scale_resids):
+def fit_models(df, fit_genes, model):
     """Loop through anchor guides and fit a linear model
 
     Parameters
@@ -378,8 +494,8 @@ def fit_models(df, fit_genes, scale_resids):
         LFCs for all anchor guides
     fit_genes: list
         Genes used to fit the linear model
-    scale_resids: bool
-        Whether to scale residuals by the confidence interval of the best fit line
+    model: str
+        Name of model used to fit x and y data
 
     Returns
     -------
@@ -391,7 +507,7 @@ def fit_models(df, fit_genes, scale_resids):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        residuals, model_info = fit_anchor_model(group_df, fit_genes, scale_resids)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes, model)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
@@ -403,8 +519,8 @@ def fit_models(df, fit_genes, scale_resids):
     return residual_df, model_info_df
 
 
-def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
-                        min_pairs=5):
+def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
+                        min_pairs=5, model='linear'):
     """Calculate guide-level residuals
 
     Parameters
@@ -421,11 +537,10 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
     fit_genes: list, optional
         Genes used to train each linear model. If None, uses all genes to fit. This can be helpful if we expect
         a large fraction of target_genes to be interactors
-    scale: bool, optional
-        Whether to scale residuals by the confidence interval at a fit point (experimental). The output will then
-        include a column "sclaed_residual" and "scaled_residual_z"
     min_pairs: int, optional
         Minimum number of pairs a guide must be in
+    model: str, optional
+        Name of model to fit to data
 
     Returns
     -------
@@ -444,7 +559,7 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None, scale=False,
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
     filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
-    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, scale)
+    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, model)
     return guide_residuals, model_info_df
 
 
@@ -470,21 +585,15 @@ def get_pop_stats(df, stat):
     return pop_stats
 
 
-def combine_statistic(df, pop_stats, stat):
-    """Combine a statistic for a gene pair
+def combine_z_scores(df, stat):
+    """Combine z-score for a gene pair
 
-    .. math::
-        (x - \mu)/(\sigma / \sqrt{n})
-
-    Where :math:`x, \mu, \sigma` are the sample mean, population mean, and population standard deviation of
-    residuals, and :math:`n` is the number of guide pairs.
+    Sum z-scores and divide by the square root of the number of observations
 
     Parameters
     ----------
     df: DataFrame
         guide level statistic
-    pop_stats: DataFrame
-        population stats
     stat: str
         statistic to combine
 
@@ -496,18 +605,15 @@ def combine_statistic(df, pop_stats, stat):
     guide1 = df.columns[0]
     guide2 = df.columns[1]
     combo_stats = (df.groupby(['condition', 'gene_a', 'gene_b'])
-                   .agg(mean_stat=(stat, 'mean'))
-                   .reset_index()
-                   .merge(pop_stats, how='inner', on='condition',
-                          suffixes=['', '_pop']))
+                   .agg(sum_stat=(stat, 'sum'))
+                   .reset_index())
     guide_pair_df = (df.groupby(['condition', 'gene_a', 'gene_b'])
                      .apply(lambda d: len({frozenset(x) for x in zip(d[guide1], d[guide2])}))  # use sets to count
                      # # unique guide pairs
                      .reset_index(name='guide_pairs'))
     combo_stats = combo_stats.merge(guide_pair_df, how='inner', on=['condition', 'gene_a', 'gene_b'])
-    combo_stats['z_score_' + stat] = ((combo_stats['mean_stat'] - combo_stats['mean_stat_pop']) /
-                                      (combo_stats['std_stat'] / np.sqrt(combo_stats['guide_pairs'])))
-    return combo_stats[['condition', 'gene_a', 'gene_b', 'guide_pairs', 'z_score_' + stat]]
+    combo_stats['pair_z_score'] = (combo_stats['sum_stat'] / np.sqrt(combo_stats['guide_pairs']))
+    return combo_stats[['condition', 'gene_a', 'gene_b', 'guide_pairs', 'pair_z_score']]
 
 
 def get_avg_score(df, score):
@@ -562,8 +668,6 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
         Guide level residuals
     stat: str, optional
         Statistic to combine at the gene level
-    min_pairs: int, optional
-        Minimum number of gene pairs for a gene to be considered
 
     Returns
     -------
@@ -571,10 +675,8 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
         Gene level z_scores
     """
     ordered_df = order_cols(guide_residuals, [2, 3], 'gene')
-    pop_stats = get_pop_stats(ordered_df, stat)
-    gene_a_anchor_z = combine_statistic(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], pop_stats, stat)
-    gene_b_anchor_z = combine_statistic(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], pop_stats, stat)
-    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    gene_a_anchor_z = combine_z_scores(ordered_df[ordered_df.gene_a == ordered_df.anchor_gene], stat)
+    gene_b_anchor_z = combine_z_scores(ordered_df[ordered_df.gene_b == ordered_df.anchor_gene], stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
     base_lfcs = get_base_lfc_from_resid(guide_residuals)
     gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],
@@ -583,11 +685,13 @@ def get_gene_residuals(guide_residuals, stat='residual_z'):
                     .merge(base_lfcs, how='inner', left_on=['condition', 'gene_b'],
                            right_on=['condition', 'gene'], suffixes=['_a', '_b'])
                     .drop('gene', axis=1)
-                    .merge(combined_z, how='inner', on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_a_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_a_anchor'])
+                           on=['condition', 'gene_a', 'gene_b'])
                     .merge(gene_b_anchor_z, how='inner',
-                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['', '_gene_b_anchor']))
+                           on=['condition', 'gene_a', 'gene_b', 'guide_pairs'], suffixes=['_gene_a_anchor',
+                                                                                          '_gene_b_anchor']))
+    gene_results['pair_z_score'] = (gene_results[['pair_z_score_gene_a_anchor', 'pair_z_score_gene_b_anchor']]
+                                    .sum(axis=1) / np.sqrt(2))
     return gene_results
 
 
@@ -702,8 +806,7 @@ def get_gene_dlfcs(guide_dlfcs, stat='dlfc_z'):
         Gene level z_scores
     """
     ordered_df = order_cols(guide_dlfcs, [2, 3], 'gene')
-    pop_stats = get_pop_stats(ordered_df, stat)
-    combined_z = combine_statistic(ordered_df, pop_stats, stat)
+    combined_z = combine_z_scores(ordered_df, stat)
     avg_lfc = get_avg_score(ordered_df, 'lfc')
     base_lfcs = get_base_lfc_from_dlfc(guide_dlfcs)
     gene_results = (avg_lfc.merge(base_lfcs, how='inner', left_on=['condition', 'gene_a'],
