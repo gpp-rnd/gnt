@@ -368,13 +368,11 @@ def model_spline(train_x, train_y, test_x, df=4):
         Information about GLM model
     """
     train_x = train_x.rename('x', axis=1)
-    train_x = sm.add_constant(train_x)
-    train_df = train_x.copy()
-    train_df['y'] = train_y
-    model_fit = sm.formula.ols('y ~ cr(x, df=' + str(df) + ') + const', data=train_df).fit()
-    model_info = {'model': 'spline', 'const': model_fit.params.const}
+    train_y = train_y.rename('y', axis=1)
+    train_df = pd.concat([train_x, train_y], axis=1)
+    model_fit = sm.formula.ols("y ~ cr(x, df=" + str(df) + ", constraints='center')", data=train_df).fit()
+    model_info = {'model': 'spline', 'const': model_fit.params.xs('Intercept')}
     test_x = test_x.rename('x')
-    test_x = sm.add_constant(test_x)
     predictions = model_fit.predict(test_x)
     return predictions, model_info
 
@@ -480,6 +478,7 @@ def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     else:
         raise ValueError('Model ' + model + ' not implemented')
     out_df = df.copy()
+    out_df['prediction'] = predictions
     out_df['residual'] = test_y - predictions
     out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
     return out_df, model_info

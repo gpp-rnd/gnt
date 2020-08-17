@@ -225,7 +225,8 @@ def test_model_quadratic_ols():
 def test_model_spline_glm():
     train_x = pd.Series([-2, -1, 0, 1, 2])
     train_y = pd.Series([2, 2, 1, 0.5, 1])
-    spline_predictions, _ = score.model_spline(train_x, train_y, train_x)
+    spline_predictions, model_info = score.model_spline(train_x, train_y, train_x)
+    np.testing.assert_almost_equal(model_info['const'], 1, 0)
     spline_residual = (spline_predictions - train_y).abs().mean()
     quad_predictions, _ = score.model_quadratic(train_x, train_y, train_x)
     quad_residual = (quad_predictions - train_y).abs().mean()
