@@ -55,3 +55,7 @@ History
 
 * Added spline, fixed slope and quadratic models for calculating guide residuals
 * Combined z-scores by square root of sample size rather than re-calculating z-scores
+
+0.3.1 (2020-08-10)
+------------------
+* Centered spline for interpretable intercept
