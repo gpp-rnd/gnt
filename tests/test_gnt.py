@@ -64,7 +64,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
     anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
     train_df = anchor_base_scores.loc[(anchor_base_scores.anchor_guide == 'GCTGTATCCTTTCTGGGAAAG') &
                                       (anchor_base_scores.condition == 'Day 21_Meljuso'), :]  # BCL2L1 guide
-    residuals, model_info = score.fit_anchor_model(train_df, None, 'linear')
+    residuals, model_info = score.fit_anchor_model(train_df, None, 'linear', 6)
     assert model_info['R2'] > 0.5
     gene_residuals = (residuals.groupby('target_gene')
                       .agg({'residual_z': 'mean'})
@@ -72,7 +72,7 @@ def test_fit_anchor_model(bigpapi_lfcs):
                       .reset_index())
     assert gene_residuals.loc[0, 'target_gene'] == 'MCL1'
     assert gene_residuals['target_gene'].iloc[-1] == 'BCL2L1'
-    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'linear')
+    _, ctl_model_info = score.fit_anchor_model(train_df, ['CD81', 'HPRT intron'], 'linear', 6)
     assert model_info['f_pvalue'] < ctl_model_info['f_pvalue']
 
 
@@ -225,7 +225,7 @@ def test_model_quadratic_ols():
 def test_model_spline_glm():
     train_x = pd.Series([-2, -1, 0, 1, 2])
     train_y = pd.Series([2, 2, 1, 0.5, 1])
-    spline_predictions, model_info = score.model_spline(train_x, train_y, train_x)
+    spline_predictions, model_info = score.model_spline(train_x, train_y, train_x, 6)
     np.testing.assert_almost_equal(model_info['const'], 1, 0)
     spline_residual = (spline_predictions - train_y).abs().mean()
     quad_predictions, _ = score.model_quadratic(train_x, train_y, train_x)
@@ -234,3 +234,15 @@ def test_model_spline_glm():
     linear_residual = (linear_predictions - train_y).abs().mean()
     assert spline_residual < linear_residual
     assert spline_residual < quad_residual
+
+
+def test_get_guide_residuals_spline(bigpapi_lfcs):
+    guide_residuals, model_info_df = gnt.get_guide_residuals(bigpapi_lfcs, ['CD81', 'HPRT intron'],
+                                                             model='spline', deg=6)
+    assert ((guide_residuals.groupby(['anchor_gene', 'target_gene', 'condition'])
+             .agg({'residual_z': 'mean'})
+             .sort_values('residual_z')
+             .reset_index()
+             .head(1)
+             [['anchor_gene', 'target_gene']]
+             .values) == [['MAPK1', 'MAPK3']]).all()

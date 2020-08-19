@@ -348,7 +348,7 @@ def model_fixed_slope(train_x, train_y, test_x, slope=1):
     return predictions, model_info
 
 
-def model_spline(train_x, train_y, test_x, df=4):
+def model_spline(train_x, train_y, test_x, deg):
     """Predict guide phenotype using a natural cubic spline
 
     Parameters
@@ -359,6 +359,8 @@ def model_spline(train_x, train_y, test_x, df=4):
         Pair phenotype for training genes
     test_x: Series
         Single gene phenotype for testing genes
+    deg: int
+        Degrees of freedom for spline model
 
     Returns
     -------
@@ -370,7 +372,7 @@ def model_spline(train_x, train_y, test_x, df=4):
     train_x = train_x.rename('x', axis=1)
     train_y = train_y.rename('y', axis=1)
     train_df = pd.concat([train_x, train_y], axis=1)
-    model_fit = sm.formula.ols("y ~ cr(x, df=" + str(df) + ", constraints='center')", data=train_df).fit()
+    model_fit = sm.formula.ols("y ~ cr(x, df=" + str(deg) + ", constraints='center')", data=train_df).fit()
     model_info = {'model': 'spline', 'const': model_fit.params.xs('Intercept')}
     test_x = test_x.rename('x')
     predictions = model_fit.predict(test_x)
@@ -436,7 +438,7 @@ def model_quadratic(train_x, train_y, test_x):
     return predictions, model_info
 
 
-def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
+def fit_anchor_model(df, fit_genes, model, deg, x_col='lfc_target', y_col='lfc'):
     """Fit linear model for a single anchor guide paired with all target guides in a condition
 
     Parameters
@@ -451,6 +453,8 @@ def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
         X column to fit model
     y_col: str, optional
         Y column to fit model
+    deg: int
+        Degrees of freedom for spline model
 
     Returns
     -------
@@ -472,7 +476,7 @@ def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     elif model == 'fixed slope':
         predictions, model_info = model_fixed_slope(train_x, train_y, test_x)
     elif model == 'spline':
-        predictions, model_info = model_spline(train_x, train_y, test_x)
+        predictions, model_info = model_spline(train_x, train_y, test_x, deg)
     elif model == 'quadratic':
         predictions, model_info = model_quadratic(train_x, train_y, test_x)
     else:
@@ -484,7 +488,7 @@ def fit_anchor_model(df, fit_genes, model, x_col='lfc_target', y_col='lfc'):
     return out_df, model_info
 
 
-def fit_models(df, fit_genes, model):
+def fit_models(df, fit_genes, model, deg):
     """Loop through anchor guides and fit a linear model
 
     Parameters
@@ -495,6 +499,8 @@ def fit_models(df, fit_genes, model):
         Genes used to fit the linear model
     model: str
         Name of model used to fit x and y data
+    deg: int
+        Degrees of freedom for spline model
 
     Returns
     -------
@@ -506,7 +512,7 @@ def fit_models(df, fit_genes, model):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        residuals, model_info = fit_anchor_model(group_df, fit_genes, model)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes, model, deg)
         residual_list.append(residuals)
         model_info['anchor_guide'] = guide_condition[0]
         model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
@@ -519,7 +525,7 @@ def fit_models(df, fit_genes, model):
 
 
 def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
-                        min_pairs=5, model='linear'):
+                        min_pairs=5, model='linear', deg=6):
     """Calculate guide-level residuals
 
     Parameters
@@ -540,6 +546,8 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
         Minimum number of pairs a guide must be in
     model: str, optional
         Name of model to fit to data
+    deg: int, optional
+        Degrees of freedom for spline model. Ignored if model is not spline
 
     Returns
     -------
@@ -558,7 +566,7 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
     filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
-    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, model)
+    guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, model, deg)
     return guide_residuals, model_info_df
 
 
