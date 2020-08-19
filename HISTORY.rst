@@ -59,3 +59,7 @@ History
 0.3.1 (2020-08-10)
 ------------------
 * Centered spline for interpretable intercept
+
+0.3.2 (2020-08-19)
+------------------
+* Added argument for degrees of freedom of spline
