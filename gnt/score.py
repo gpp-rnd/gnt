@@ -512,12 +512,14 @@ def fit_models(df, fit_genes, model, deg):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        residuals, model_info = fit_anchor_model(group_df, fit_genes, model, deg)
-        residual_list.append(residuals)
-        model_info['anchor_guide'] = guide_condition[0]
-        model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
-        model_info['condition'] = guide_condition[1]
-        model_info_list.append(model_info)
+        if (fit_genes is not None and group_df['anchor_gene'].unique() not in fit_genes) or \
+            (fit_genes is None):
+            residuals, model_info = fit_anchor_model(group_df, fit_genes, model, deg)
+            residual_list.append(residuals)
+            model_info['anchor_guide'] = guide_condition[0]
+            model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
+            model_info['condition'] = guide_condition[1]
+            model_info_list.append(model_info)
     model_info_df = pd.DataFrame(model_info_list)
     residual_df = (pd.concat(residual_list, axis=0)
                    .reset_index(drop=True))
