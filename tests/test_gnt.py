@@ -133,11 +133,6 @@ def test_get_gene_residuals(bigpapi_lfcs):
              .head(1)
              [['gene_a', 'gene_b']]
              .values) == [['MAPK1', 'MAPK3']]).all()
-    gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
-    assert ((gene_results.sort_values('pair_z_score')
-             .head(1)
-             [['gene_a', 'gene_b']]
-             .values) == [['MAPK1', 'MAPK3']]).all()
 
 
 def test_get_guide_dlfc(bigpapi_lfcs):
@@ -246,3 +241,55 @@ def test_get_guide_residuals_spline(bigpapi_lfcs):
              .head(1)
              [['anchor_gene', 'target_gene']]
              .values) == [['MAPK1', 'MAPK3']]).all()
+
+
+def generate_bigpapi_train_df(lfcs, fit_genes):
+    train_lfcs = lfcs[~(lfcs['U6 gene'].isin(fit_genes) & lfcs['H1 gene'].isin(fit_genes))]
+    return train_lfcs
+
+
+def test_check_training_data(bigpapi_lfcs):
+    fit_genes = ['6T', 'EEF2', 'PARP1', 'BCL2L10']
+    min_pairs = 5
+    lfc_df = generate_bigpapi_train_df(bigpapi_lfcs, fit_genes)
+    score.check_guide_input(lfc_df)
+    melted_lfc_df = score.melt_df(lfc_df)
+    reordered_guides = score.order_cols_with_meta(melted_lfc_df, [0, 1], [2, 3], 'guide', 'gene')
+    dedup_guide_lfcs = score.aggregate_guide_lfcs(reordered_guides)
+    melted_anchor_df = score.build_anchor_df(dedup_guide_lfcs)
+    guide_base_score = score.get_base_score(melted_anchor_df, ['CD81', 'HPRT intron'])
+    no_control_guides = score.get_no_control_guides(melted_anchor_df, guide_base_score)
+    score.warn_no_control_guides(melted_anchor_df, no_control_guides)
+    anchor_base_scores = score.join_anchor_base_score(melted_anchor_df, guide_base_score)
+    filtered_anchor_base_scores = score.check_training_data(anchor_base_scores, fit_genes, min_pairs)
+    og_genes = anchor_base_scores['anchor_gene'].unique()
+    new_genes = filtered_anchor_base_scores['anchor_gene'].unique()
+    filtered_genes = set(og_genes) - set(new_genes)
+    assert filtered_genes == set(fit_genes)
+
+
+def test_get_guide_residuals_train(bigpapi_lfcs):
+    fit_genes = ['6T', 'EEF2', 'PARP1', 'BCL2L10']
+    lfc_df = generate_bigpapi_train_df(bigpapi_lfcs, fit_genes)
+    guide_residuals, _ = gnt.get_guide_residuals(lfc_df, ['CD81', 'HPRT1 intron'], fit_genes=fit_genes)
+    assert (guide_residuals['anchor_gene'].isin(fit_genes).sum() == 0)
+    assert (guide_residuals.loc[guide_residuals['target_gene'].isin(fit_genes), 'residual_z'].abs().mean() <
+            guide_residuals.loc[~guide_residuals['target_gene'].isin(fit_genes), 'residual_z'].abs().mean())
+    assert ((guide_residuals.groupby(['anchor_gene', 'target_gene', 'condition'])
+             .agg({'residual_z': 'mean'})
+             .sort_values('residual_z')
+             .reset_index()
+             .head(1)
+             [['anchor_gene', 'target_gene']]
+             .values) == [['MCL1', 'BCL2L1']]).all()
+
+
+def test_get_gene_residuals_train(bigpapi_lfcs):
+    fit_genes = ['6T', 'EEF2', 'PARP1', 'BCL2L10']
+    lfc_df = generate_bigpapi_train_df(bigpapi_lfcs, fit_genes)
+    guide_residuals, _ = gnt.get_guide_residuals(lfc_df, ['CD81', 'HPRT intron'], fit_genes=fit_genes)
+    gene_results = gnt.get_gene_residuals(guide_residuals, 'residual_z')
+    assert ((gene_results.sort_values('pair_z_score')
+             .head(1)
+             [['gene_a', 'gene_b']]
+             .values) == [['BCL2L1', 'MCL1']]).all()

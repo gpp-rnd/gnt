@@ -150,6 +150,40 @@ def build_anchor_df(df):
     return anchor_df
 
 
+def check_training_data(anchor_df, fit_genes, min_pairs):
+    """Check that anchor guides will have enough pairs after filtering for training genes
+
+    Parameters
+    ----------
+    anchor_df: DataFrame
+        Anchor guides paired with all of their target guides.
+        Has columns anchor_guide, condition, target guide, anchor gene
+    fit_genes: list
+        List of genes used to fit the models
+    min_pairs: int
+        Minimum number of training target_guides each anchor_guide must be paired with
+
+    Returns
+    -------
+    DataFrame
+        Filtered anchor_df for guides with enough training data
+    """
+    model_df = anchor_df[anchor_df['target_gene'].isin(fit_genes)].copy()
+    anchor_guide_pairs = (model_df.groupby(['anchor_guide', 'condition'])
+                          .agg(target_guides=('target_guide', 'nunique'))
+                          .groupby('anchor_guide')
+                          .agg(target_guides=('target_guides', 'median'))
+                          .reset_index())
+    guides_to_model = anchor_guide_pairs.loc[anchor_guide_pairs.target_guides >= min_pairs, 'anchor_guide']
+    guide_gene = anchor_df[['anchor_guide', 'anchor_gene']].drop_duplicates()
+    missing_guides = guide_gene[~guide_gene['anchor_guide'].isin(guides_to_model)].sort_values('anchor_gene')
+    warnings.warn('There are ' + str(len(missing_guides)) + ' guides without enough training pairs, '
+                                                            'these will be filtered out:\n' +
+                  str(missing_guides), stacklevel=2)
+    filtered_anchor_df = anchor_df[anchor_df['anchor_guide'].isin(guides_to_model)]
+    return filtered_anchor_df
+
+
 def get_base_score(df, ctl_genes):
     """Get LFC of each guide when paired with controls
 
@@ -484,7 +518,12 @@ def fit_anchor_model(df, fit_genes, model, deg, x_col='lfc_target', y_col='lfc')
     out_df = df.copy()
     out_df['prediction'] = predictions
     out_df['residual'] = test_y - predictions
-    out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
+    if fit_genes is None:
+        out_df['residual_z'] = (out_df['residual'] - out_df['residual'].mean())/out_df['residual'].std()
+    else:
+        train_df_predictions = out_df[out_df['target_gene'].isin(fit_genes)]
+        out_df['residual_z'] = (out_df['residual'] - train_df_predictions['residual'].mean() /
+                                train_df_predictions['residual'].std())
     return out_df, model_info
 
 
@@ -512,14 +551,12 @@ def fit_models(df, fit_genes, model, deg):
     model_info_list = []
     residual_list = []
     for guide_condition, group_df in df.groupby(['anchor_guide', 'condition']):
-        if (fit_genes is not None and group_df['anchor_gene'].unique() not in fit_genes) or \
-            (fit_genes is None):
-            residuals, model_info = fit_anchor_model(group_df, fit_genes, model, deg)
-            residual_list.append(residuals)
-            model_info['anchor_guide'] = guide_condition[0]
-            model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
-            model_info['condition'] = guide_condition[1]
-            model_info_list.append(model_info)
+        residuals, model_info = fit_anchor_model(group_df, fit_genes, model, deg)
+        residual_list.append(residuals)
+        model_info['anchor_guide'] = guide_condition[0]
+        model_info['anchor_gene'] = group_df['anchor_gene'].values[0]
+        model_info['condition'] = guide_condition[1]
+        model_info_list.append(model_info)
     model_info_df = pd.DataFrame(model_info_list)
     residual_df = (pd.concat(residual_list, axis=0)
                    .reset_index(drop=True))
@@ -567,7 +604,10 @@ def get_guide_residuals(lfc_df, ctl_genes, fit_genes=None,
     no_control_guides = get_no_control_guides(melted_anchor_df, guide_base_score)
     warn_no_control_guides(melted_anchor_df, no_control_guides)
     anchor_base_scores = join_anchor_base_score(melted_anchor_df, guide_base_score)
-    filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
+    if fit_genes is not None:
+        filtered_anchor_base_scores = check_training_data(anchor_base_scores, fit_genes, min_pairs)
+    else:
+        filtered_anchor_base_scores = filter_anchor_base_scores(anchor_base_scores, min_pairs)
     guide_residuals, model_info_df = fit_models(filtered_anchor_base_scores, fit_genes, model, deg)
     return guide_residuals, model_info_df
 
