@@ -43,8 +43,8 @@ Basic python usage
     import gnt
     import pandas as pd
     lfcs = pd.read_csv('https://raw.githubusercontent.com/PeterDeWeirdt/bigpapi/master/data/processed/bigpapi_lfcs.csv')
-    guide_residuals, model_info = gnt.get_guide_residuals(lfcs, ['CD81', 'HPRT intron'], scale=True)
-    gene_scores = gnt.get_gene_residuals(guide_residuals, 'scaled_residual_z')
+    guide_residuals, model_info = gnt.get_guide_residuals(lfcs, ['CD81', 'HPRT intron'])
+    guide_residuals.sort_values('residual_z')
 
 
 TODO
